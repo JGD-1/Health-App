@@ -32,12 +32,14 @@ const NL = {
   // overview
   'Your week': 'Jouw week', 'Calendar': 'Kalender', 'Every day': 'Elke dag', 'Per month': 'Per maand', 'Summary': 'Samenvatting',
   'Dry': 'Droog',
+  'Sport': 'Sport', 'Yes, I exercised': 'Ja, gesport', 'No sport yet': 'Nog niet gesport', 'Tap to undo': 'Tik om terug te zetten',
+  'Tap if you exercised today': 'Tik als je vandaag hebt gesport', 'days with sport (of days logged)': 'dagen gesport (van ingevulde dagen)',
+  'Colour = {m} score. Small number = drinks that day. 🏃 = exercised.': 'Kleur = score voor {m}. Klein getal = drankjes die dag. 🏃 = gesport.',
   'avg food ({a}/{b} days)': 'gem. eten ({a}/{b} dagen)', 'avg mood ({a}/{b} days)': 'gem. stemming ({a}/{b} dagen)',
   'alcohol-free (of days logged)': 'alcoholvrij (van ingevulde dagen)',
   'weight, {d} kg in this period': 'gewicht, {d} kg in deze periode', 'latest weight': 'laatste gewicht',
   '{n} drinks in total': '{n} drankjes in totaal', 'No weight logged in this period.': 'Geen gewicht ingevuld in deze periode.',
   'Left half: {a} · right half: {b}': 'Linkerhelft: {a} · rechterhelft: {b}',
-  'Colour = {m} score. Small number = drinks that day.': 'Kleur = score voor {m}. Klein getal = drankjes die dag.',
   'One row per month, one square per day, coloured by {m} score. Tap a month to open it.': 'Eén rij per maand, één vakje per dag, gekleurd op {m}. Tik op een maand om die te openen.',
 
   // settings: data

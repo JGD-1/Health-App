@@ -2,7 +2,7 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 const VAPID_PUBLIC = 'BGDrlOvXvSGbsm_TN3JPTtLm4LiTMAoMRHi9E4iH0XVlDueHdl6VzO3bSB5c0_e1-2YoR3lvN3E2YDiEtw1mMgk';
 const SUPABASE_URL = 'https://fvwdcyucxiiycdefqxtf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XwWKCUSP5-DFqJD-Q9ZUpw_KeYwGibY'; // public key; data is protected by each phone's secret key
@@ -163,7 +163,7 @@ const Sync = {
       for (let i = 0; i < keys.length; i += 500) {
         const chunk = keys.slice(i, i + 500).map(k => {
           const d = state.days[k];
-          return d ? { day: k, food: d.food, mood: d.mood, weight: d.weight, beer: d.beer || 0, wine: d.wine || 0, liquor: d.liquor || 0, u: d.u || dirty[k] }
+          return d ? { day: k, food: d.food, mood: d.mood, weight: d.weight, beer: d.beer || 0, wine: d.wine || 0, liquor: d.liquor || 0, sport: !!d.sport, u: d.u || dirty[k] }
                    : { day: k, deleted: true, u: dirty[k] };
         });
         await rpc('tracker_push', { p_secret: secret, p_days: chunk });
@@ -182,12 +182,12 @@ const Sync = {
         const local = state.days[r.day];
         if (local && local.u && Date.parse(local.u) >= Date.parse(r.u)) continue;
         if (r.deleted) delete state.days[r.day];
-        else state.days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor, u: r.u };
+        else state.days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor, sport: !!r.sport, u: r.u };
       }
       state.sync.lastPull = res.now;
       if (me.partner) {
         const days = {};
-        for (const r of res.partner) days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor };
+        for (const r of res.partner) days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor, sport: !!r.sport };
         state.sync.partner = { name: me.partner.name || tr('Partner'), shareWeight: !!me.partner.share_weight, days };
       } else state.sync.partner = null;
       state.sync.lastSync = new Date().toISOString();
@@ -244,14 +244,14 @@ const fmtMonth = d => d.toLocaleDateString(LOC(), { month: 'long', year: 'numeri
 const fmt1 = n => (Math.round(n * 10) / 10).toLocaleString(LOC());
 
 /* ---------- Domain ---------- */
-const EMPTY = Object.freeze({ food: null, mood: null, weight: null, beer: 0, wine: 0, liquor: 0 });
+const EMPTY = Object.freeze({ food: null, mood: null, weight: null, beer: 0, wine: 0, liquor: 0, sport: false });
 const myDay = k => state.days[k] || EMPTY;
 const drinksOf = d => (d.beer || 0) + (d.wine || 0) + (d.liquor || 0);
 function updateDay(k, fn) {
   const d = { ...EMPTY, ...(state.days[k] || {}) };
   fn(d);
   d.u = new Date().toISOString();
-  if (d.food == null && d.mood == null && d.weight == null && !drinksOf(d)) delete state.days[k]; else state.days[k] = d;
+  if (d.food == null && d.mood == null && d.weight == null && !drinksOf(d) && !d.sport) delete state.days[k]; else state.days[k] = d;
   save();
   Sync.dayChanged(k, state.days[k] || null);
 }
@@ -263,20 +263,21 @@ function summarise(keys, days) {
   const moods = past.map(k => (days[k] || EMPTY).mood).filter(Boolean);
   const weights = past.map(k => (days[k] || EMPTY).weight).filter(w => w != null);
   const sum = { beer: 0, wine: 0, liquor: 0 };
-  let free = 0, logged = 0;
+  let free = 0, logged = 0, sport = 0;
   for (const k of past) {
     const d = days[k];
     if (!d) continue; // a day nobody logged doesn't count as alcohol-free
     logged++;
     for (const x of DRINKS) sum[x.id] += d[x.id] || 0;
     if (!drinksOf(d)) free++;
+    if (d.sport) sport++;
   }
   return {
     days: past.length, rated: rated.length,
     avgFood: rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null,
     avgMood: moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null, moodDays: moods.length,
     weightFirst: weights.length ? weights[0] : null, weightLast: weights.length ? weights[weights.length - 1] : null,
-    ...sum, drinks: sum.beer + sum.wine + sum.liquor, free, logged,
+    ...sum, drinks: sum.beer + sum.wine + sum.liquor, free, logged, sport,
   };
 }
 
@@ -392,6 +393,15 @@ function renderDay() {
         el('button', { class: 'dt-btn plus', 'aria-label': `+ ${tr(x.name)}`, onclick: () => change(x.id, 1) }, '+')),
     ));
   }
+  const sp = $('#sportRow');
+  sp.innerHTML = '';
+  sp.append(el('button', { class: `sport-tile${d.sport ? ' on' : ''}`, 'aria-pressed': String(!!d.sport),
+    onclick: () => { updateDay(dayKey, y => { y.sport = !y.sport; }); renderDay(); } },
+    el('span', { class: 'st-emoji' }, '🏃'),
+    el('span', { class: 'st-text' }, el('b', {}, d.sport ? tr('Yes, I exercised') : tr('No sport yet')), el('small', {}, d.sport ? tr('Tap to undo') : tr('Tap if you exercised today'))),
+    el('span', { class: 'st-check' }, d.sport ? '✓' : '')));
+  $('#sportHint').textContent = '';
+
   const total = drinksOf(d);
   $('#drinkSummary').textContent = total ? tr('{n} today', { n: total }) : tr('None');
 
@@ -405,6 +415,7 @@ function renderDay() {
       el('div', { class: 'partner-row' },
         el('div', { class: `mini-tile${p.food ? ' c' + p.food : ''}`, title: tr('Food') }, p.food ? String(p.food) : '–'),
         el('div', { class: `mini-tile${p.mood ? ' c' + p.mood : ''}`, title: tr('Mood') }, p.mood ? MOODS[p.mood].icon : '–'),
+        el('div', { class: `mini-tile sport${p.sport ? ' on' : ''}`, title: tr('Sport') }, p.sport ? '🏃' : '–'),
         el('div', {}, drinksOf(p) ? DRINKS.filter(x => p[x.id]).map(x => `${x.icon} ${p[x.id]}`).join('   ') : el('span', { class: 'muted' }, tr('No drinks'))),
       ),
     );
@@ -445,6 +456,7 @@ function statsBlock(label, s, showLabel) {
       el('div', { class: 'stat' }, el('b', {}, s.avgFood != null ? fmt1(s.avgFood) : '–'), el('span', {}, tr('avg food ({a}/{b} days)', { a: s.rated, b: s.days }))),
       el('div', { class: 'stat' }, el('b', {}, s.avgMood != null ? fmt1(s.avgMood) : '–'), el('span', {}, tr('avg mood ({a}/{b} days)', { a: s.moodDays, b: s.days }))),
       el('div', { class: 'stat' }, el('b', {}, `${s.free}/${s.logged}`), el('span', {}, tr('alcohol-free (of days logged)'))),
+      el('div', { class: 'stat' }, el('b', {}, `${s.sport}/${s.logged}`), el('span', {}, tr('days with sport (of days logged)'))),
       el('div', { class: 'stat' }, el('b', {}, s.weightLast != null ? fmtKg(s.weightLast) : '–'),
         el('span', {}, s.weightLast != null && s.weightFirst != null && s.weightLast !== s.weightFirst ? tr('weight, {d} kg in this period', { d: `${s.weightLast > s.weightFirst ? '+' : ''}${fmt1(s.weightLast - s.weightFirst)}` }) : tr('latest weight'))),
       el('div', { class: 'stat wide' }, el('b', {}, drinkLine(s)), el('span', {}, tr('{n} drinks in total', { n: s.drinks }))),
@@ -512,9 +524,10 @@ function renderWeek(box) {
     const n = drinksOf(d) + (who === 'both' ? drinksOf(Sync.partnerDays[k] || EMPTY) : 0);
     const sc = who === 'both' ? null : d[metric];
     const food = sc == null ? null : metric === 'mood' ? MOODS[sc].icon : String(sc);
+    const sportN = (d.sport ? 1 : 0) + (who === 'both' && (Sync.partnerDays[k] || EMPTY).sport ? 1 : 0);
     const drinkText = !n ? '' : who === 'both' ? `${n} drinks` : DRINKS.filter(x => d[x.id]).map(x => `${x.icon}${d[x.id]}`).join(' ');
     grid.append(el('div', { class: `wf${k === t ? ' today' : ''}${k > t ? ' future' : ''}`, onclick: k > t ? null : () => openDay(k) },
-      el('div', { class: 'wt', style: `background:${cellBg(k, who)}` }, food || ''),
+      el('div', { class: 'wt', style: `background:${cellBg(k, who)}` }, food || '', sportN ? el('span', { class: 'wsp', title: tr('Sport') }, sportN > 1 ? '🏃🏃' : '🏃') : null),
       el('div', { class: 'wd' }, DAY_SHORT_[lang()][i]),
       el('div', { class: 'wdr' }, drinkText),
     ));
@@ -536,14 +549,15 @@ function renderMonth(box) {
     keys.push(k);
     const d = who === 'partner' ? (Sync.partnerDays[k] || EMPTY) : myDay(k);
     const drinks = drinksOf(d) + (who === 'both' ? drinksOf(Sync.partnerDays[k] || EMPTY) : 0);
+    const sported = d.sport || (who === 'both' && (Sync.partnerDays[k] || EMPTY).sport);
     grid.append(el('div', {
       class: `cal-d${k === t ? ' today' : ''}${k > t ? ' future' : ''}`, style: k > t ? '' : `background:${cellBg(k, who)}`,
       onclick: k > t ? null : () => openDay(k),
-    }, el('span', { class: 'cal-n' }, String(day)), drinks ? el('span', { class: 'cal-x' }, String(drinks)) : null));
+    }, el('span', { class: 'cal-n' }, String(day)), sported ? el('span', { class: 'cal-s' }, '🏃') : null, drinks ? el('span', { class: 'cal-x' }, String(drinks)) : null));
   }
   box.append(el('div', { class: 'card' },
     cardHead(tr('Calendar')), grid,
-    el('p', { class: 'muted small' }, tr('Colour = {m} score. Small number = drinks that day.', { m: tr(METRICS[metric]).toLowerCase() })), legend(),
+    el('p', { class: 'muted small' }, tr('Colour = {m} score. Small number = drinks that day. 🏃 = exercised.', { m: tr(METRICS[metric]).toLowerCase() })), legend(),
   ), weightCard(keys), statsCard(keys));
 }
 
@@ -569,7 +583,7 @@ function renderYear(box) {
   // Per-month table
   const ps = people();
   const table = el('table', { class: 'mt' },
-    el('thead', {}, el('tr', {}, el('th', {}, ''), ps.length > 1 ? el('th', {}, '') : null, el('th', {}, tr('Food')), el('th', {}, tr('Mood')), el('th', {}, tr('Drinks')), el('th', {}, tr('Dry')))),
+    el('thead', {}, el('tr', {}, el('th', {}, ''), ps.length > 1 ? el('th', {}, '') : null, el('th', {}, tr('Food')), el('th', {}, tr('Mood')), el('th', {}, tr('Drinks')), el('th', {}, tr('Dry')), el('th', {}, '🏃'))),
     el('tbody', {}, rows.filter(r => r.keys[0] <= t).flatMap(r => ps.map((p, i) => {
       const s = summarise(r.keys, p.days);
       return el('tr', { class: i === ps.length - 1 ? 'last' : '', onclick: () => { anchor = new Date(y, r.m, 1); period = 'month'; render(); } },
@@ -579,6 +593,7 @@ function renderYear(box) {
         el('td', {}, s.avgMood != null ? el('span', { class: `pill c${Math.round(s.avgMood)}` }, fmt1(s.avgMood)) : '–'),
         el('td', {}, String(s.drinks)),
         el('td', {}, s.logged ? `${s.free}/${s.logged}` : '–'),
+        el('td', {}, s.logged ? String(s.sport) : '–'),
       );
     }))),
   );
@@ -838,10 +853,10 @@ function exportJson() {
   download(`daily-tracker-backup-${todayKey()}.json`, JSON.stringify({ app: 'daily-tracker', exportedAt: new Date().toISOString(), schema: state.schema, createdAt: state.createdAt, settings: state.settings, days: state.days }, null, 2), 'application/json');
 }
 function exportCsv() {
-  const rows = [['date', 'food', 'mood', 'weight_kg', 'beer', 'wine', 'liquor']];
+  const rows = [['date', 'food', 'mood', 'weight_kg', 'beer', 'wine', 'liquor', 'sport']];
   for (const k of Object.keys(state.days).sort()) {
     const d = state.days[k];
-    rows.push([k, d.food ?? '', d.mood ?? '', d.weight ?? '', d.beer || 0, d.wine || 0, d.liquor || 0]);
+    rows.push([k, d.food ?? '', d.mood ?? '', d.weight ?? '', d.beer || 0, d.wine || 0, d.liquor || 0, d.sport ? 1 : 0]);
   }
   download(`daily-tracker-${todayKey()}.csv`, rows.map(r => r.join(',')).join('\n'), 'text/csv');
 }

@@ -131,6 +131,28 @@ main { max-width: 560px; margin: 0 auto; padding: 6px 16px 16px; }
 .dt-btn:disabled { opacity: .35; }
 .dt-btn:active:not(:disabled) { transform: scale(.94); }
 
+/* Sport: one yes/no tile */
+.sport-tile {
+  width: 100%; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 0; border-radius: 20px;
+  background: var(--card-2); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+.sport-tile.on { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.sport-tile:active { transform: scale(.98); }
+.st-emoji { font-size: 2.4rem; line-height: 1; filter: grayscale(1); opacity: .55; transition: filter .15s, opacity .15s; }
+.sport-tile.on .st-emoji { filter: none; opacity: 1; }
+.st-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.st-text small { color: var(--muted); font-size: .8rem; }
+.st-check {
+  width: 30px; height: 30px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line);
+  display: flex; align-items: center; justify-content: center; font-weight: 800;
+}
+.sport-tile.on .st-check { background: var(--accent); color: var(--accent-text); box-shadow: none; }
+.wt { position: relative; }
+.wsp { position: absolute; top: -6px; right: -6px; font-size: .8rem; line-height: 1; text-shadow: none; }
+.cal-s { position: absolute; top: 3px; right: 4px; font-size: .7rem; line-height: 1; text-shadow: none; }
+.mini-tile.sport.on { background: var(--accent-soft); }
+
 /* Weight */
 .weight-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .weight-line .btn { margin-top: 0; padding: 10px 16px; white-space: nowrap; flex: none; }
