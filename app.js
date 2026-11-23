@@ -2,7 +2,9 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
+const SUPABASE_URL = 'https://fvwdcyucxiiycdefqxtf.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_XwWKCUSP5-DFqJD-Q9ZUpw_KeYwGibY'; // public key; data is protected by each phone's secret key
 const SCHEMA = 2;
 
 const DRINKS = [
@@ -35,7 +37,12 @@ function freshState() {
     // days['YYYY-MM-DD'] = { food: 1..5|null, mood: 1..5|null, weight: kg|null, beer, wine, liquor, u: ISO time of last change }
     days: {},
     settings: { name: '' },
+    sync: freshSync(),
   };
+}
+function freshSync() {
+  // secret: this phone's private key (null = sharing off). dirty: days changed since last upload (key → change time).
+  return { secret: null, lastPull: null, lastSync: null, dirty: {}, shareWeight: false, partner: null };
 }
 
 /* ---------- Storage ---------- */
@@ -100,6 +107,7 @@ function migrate(s) {
   s.days = s.days || {};
   for (const d of Object.values(s.days)) { if (d.mood === undefined) d.mood = null; if (d.weight === undefined) d.weight = null; }
   s.settings = Object.assign({ name: '' }, s.settings || {});
+  s.sync = Object.assign(freshSync(), s.sync || {});
   return s;
 }
 
@@ -113,13 +121,107 @@ function save() {
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 }
 
-/* ---------- Sync hook (partner sharing) ----------
-   Until sharing is set up, the partner has no data and the overview shows only "me". */
+/* ---------- Sync (partner sharing via Supabase) ----------
+   Each phone has a random secret key. The server only stores a hash of it; every call proves who you are with it.
+   Changed days are uploaded; newest edit per day wins. The partner's days are downloaded read-only. */
+async function rpc(fn, args) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  });
+  const text = await r.text();
+  if (!r.ok) { let m = text; try { m = JSON.parse(text).message || text; } catch (e) { /* ignore */ } throw new Error(m); }
+  return text ? JSON.parse(text) : null;
+}
+function newSecret() {
+  const b = new Uint8Array(32); crypto.getRandomValues(b);
+  return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+}
 const Sync = {
-  enabled: false,
-  partnerName: '',
-  partnerDays: {},
-  dayChanged(/* key, day */) {},
+  get on() { return !!(state && state.sync.secret); },
+  get enabled() { return this.on && !!state.sync.partner; }, // partner connected
+  get partnerName() { return (state.sync.partner && state.sync.partner.name) || ''; },
+  get partnerDays() { return (state && state.sync.partner && state.sync.partner.days) || {}; },
+  busy: false, timer: null, error: '',
+  dayChanged(k) {
+    if (!this.on) return;
+    state.sync.dirty[k] = (state.days[k] && state.days[k].u) || new Date().toISOString();
+    save(); this.schedule(1500);
+  },
+  schedule(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), ms); },
+  async run() {
+    if (!this.on || this.busy) return;
+    this.busy = true;
+    const secret = state.sync.secret;
+    try {
+      // 1. upload changed days (in chunks)
+      const dirty = { ...state.sync.dirty };
+      const keys = Object.keys(dirty);
+      for (let i = 0; i < keys.length; i += 500) {
+        const chunk = keys.slice(i, i + 500).map(k => {
+          const d = state.days[k];
+          return d ? { day: k, food: d.food, mood: d.mood, weight: d.weight, beer: d.beer || 0, wine: d.wine || 0, liquor: d.liquor || 0, u: d.u || dirty[k] }
+                   : { day: k, deleted: true, u: dirty[k] };
+        });
+        await rpc('tracker_push', { p_secret: secret, p_days: chunk });
+      }
+      for (const k of keys) if (state.sync.dirty[k] === dirty[k]) delete state.sync.dirty[k];
+      // 2. profile + partner
+      const me = await rpc('tracker_me', { p_secret: secret });
+      if (me.name) state.settings.name = me.name;
+      state.sync.shareWeight = !!me.share_weight;
+      // 3. download own changes (other phone / reinstall) and the partner's days
+      const res = await rpc('tracker_pull', { p_secret: secret, p_since: state.sync.lastPull });
+      for (const r of res.mine) {
+        if (state.sync.dirty[r.day]) continue; // a newer local edit is waiting to upload
+        const local = state.days[r.day];
+        if (local && local.u && Date.parse(local.u) >= Date.parse(r.u)) continue;
+        if (r.deleted) delete state.days[r.day];
+        else state.days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor, u: r.u };
+      }
+      state.sync.lastPull = res.now;
+      if (me.partner) {
+        const days = {};
+        for (const r of res.partner) days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor };
+        state.sync.partner = { name: me.partner.name || 'Partner', shareWeight: !!me.partner.share_weight, days };
+      } else state.sync.partner = null;
+      state.sync.lastSync = new Date().toISOString();
+      this.error = '';
+      save();
+    } catch (e) {
+      this.error = /fetch|network|load failed/i.test(e.message) ? 'offline' : e.message;
+    } finally {
+      this.busy = false;
+    }
+    if ($('#sheetBackdrop').hidden) render();
+  },
+  statusText() {
+    if (this.busy) return 'Syncing…';
+    if (this.error === 'offline') return 'Offline. Changes are saved on this phone and sync later.';
+    if (this.error) return `Sync problem: ${this.error}`;
+    if (state.sync.lastSync) return `Last synced ${new Date(state.sync.lastSync).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+    return '';
+  },
+  async start(name) {
+    const secret = newSecret();
+    await rpc('tracker_create_account', { p_secret: secret, p_name: name });
+    state.settings.name = name;
+    state.sync = { ...freshSync(), secret };
+    for (const k of Object.keys(state.days)) state.sync.dirty[k] = state.days[k].u || new Date().toISOString();
+    save(); await this.run();
+  },
+  async useKey(secret) {
+    secret = secret.trim().toLowerCase();
+    await rpc('tracker_me', { p_secret: secret }); // throws if the key is unknown
+    state.sync = { ...freshSync(), secret };
+    for (const k of Object.keys(state.days)) state.sync.dirty[k] = state.days[k].u || new Date().toISOString();
+    save(); await this.run();
+  },
+  async erase() {
+    await rpc('tracker_delete_account', { p_secret: state.sync.secret });
+    state.sync = freshSync(); save();
+  },
 };
 
 /* ---------- Dates ---------- */
@@ -500,15 +602,151 @@ function openDay(k) { if (k > todayKey()) return; dayKey = k; setView('day'); }
 
 /* ---------- Settings ---------- */
 function renderSettings() {
-  const sc = $('#shareCard');
-  sc.innerHTML = '';
-  sc.append(el('h2', {}, 'Share with your partner'), el('p', { class: 'muted small' }, 'Coming soon: see each other\'s days in the overview.'));
+  renderShareCard();
 
   const n = Object.keys(state.days).length;
-  $('#storageInfo').textContent = `${n} day${n === 1 ? '' : 's'} logged, stored on this phone. Download a backup now and then: clearing Chrome's site data or uninstalling the app erases it.`;
+  $('#storageInfo').textContent = Sync.on
+    ? `${n} day${n === 1 ? '' : 's'} logged, stored on this phone and online. Keep your key (Share card → More options) to get them back on a new phone.`
+    : `${n} day${n === 1 ? '' : 's'} logged, stored only on this phone. Download a backup now and then: clearing Chrome's site data or uninstalling the app erases it.`;
   const g = $('#foodGuide'); g.innerHTML = '';
   for (let s = 5; s >= 1; s--) g.append(el('li', {}, el('span', { class: `pill c${s}` }, String(s)), ' ', FOOD_ANCHORS[s]));
   $('#versionInfo').textContent = `Daily Tracker v${APP_VERSION}`;
+}
+
+async function busyDo(btn, fn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'One moment…';
+  try { await fn(); } catch (e) { toast(/fetch|network|load failed/i.test(e.message) ? 'No internet connection. Try again later.' : `Didn't work: ${e.message}`); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+function renderShareCard() {
+  const sc = $('#shareCard');
+  sc.innerHTML = '';
+  sc.append(el('h2', {}, 'Share with your partner'));
+  if (!Sync.on) {
+    sc.append(
+      el('p', { class: 'muted small' }, 'Turn on sharing to see each other\'s days in the overview. Your days are then also stored online, so they are safe if you lose your phone. No email or password needed.'),
+      el('button', { class: 'btn primary wide', onclick: openStartSheet }, 'Turn on sharing'),
+      el('button', { class: 'btn wide', onclick: openUseKeySheet }, 'I already use the app on another phone'),
+    );
+    return;
+  }
+  sc.append(el('p', { class: 'muted small' }, `You are “${state.settings.name || 'me'}”. ${Sync.statusText()}`));
+  if (state.sync.partner) {
+    sc.append(el('p', {}, `Connected with `, el('b', {}, Sync.partnerName), '.'));
+  } else {
+    const codeBtn = el('button', { class: 'btn primary wide' }, 'Create a pairing code');
+    codeBtn.onclick = () => busyDo(codeBtn, async () => {
+      const code = await rpc('tracker_create_invite', { p_secret: state.sync.secret });
+      showCodeSheet(code);
+    });
+    sc.append(
+      el('p', { class: 'muted small' }, 'Not connected yet. One of you creates a code, the other types it in.'),
+      codeBtn,
+      el('button', { class: 'btn wide', onclick: openEnterCodeSheet }, 'Enter my partner\'s code'),
+    );
+  }
+  const weightToggle = el('input', { type: 'checkbox', id: 'shareWeight' });
+  weightToggle.checked = !!state.sync.shareWeight;
+  weightToggle.onchange = async () => {
+    try { await rpc('tracker_update_profile', { p_secret: state.sync.secret, p_name: null, p_share_weight: weightToggle.checked }); state.sync.shareWeight = weightToggle.checked; save(); }
+    catch (e) { weightToggle.checked = !weightToggle.checked; toast('No internet connection. Try again later.'); }
+  };
+  sc.append(el('label', { class: 'toggle', for: 'shareWeight' }, weightToggle, ' Let my partner see my weight'));
+  const syncBtn = el('button', { class: 'btn wide' }, 'Sync now');
+  syncBtn.onclick = () => busyDo(syncBtn, () => Sync.run());
+  sc.append(syncBtn, el('details', { class: 'more' },
+    el('summary', {}, 'More options'),
+    el('button', { class: 'btn wide', onclick: showKeySheet }, 'Show my key (to move to a new phone)'),
+    state.sync.partner ? el('button', { class: 'btn wide', onclick: confirmUnpair }, `Disconnect from ${Sync.partnerName}`) : null,
+    el('button', { class: 'btn danger wide', onclick: confirmErase }, 'Turn off sharing and erase my online data'),
+  ));
+}
+function openStartSheet() {
+  const name = el('input', { type: 'text', maxlength: '40', placeholder: 'e.g. Guido', value: state.settings.name || '' });
+  const go = el('button', { class: 'btn primary' }, 'Turn on');
+  go.onclick = () => {
+    if (!name.value.trim()) { name.focus(); return; }
+    busyDo(go, async () => { await Sync.start(name.value.trim()); closeSheet(); render(); toast('Sharing is on. Now connect with your partner.'); });
+  };
+  openSheet(el('div', {},
+    el('h3', {}, 'Turn on sharing'),
+    el('div', { class: 'field' }, el('label', {}, 'Your first name (your partner sees this)'), name),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+  ));
+}
+function showCodeSheet(code) {
+  const pretty = `${code.slice(0, 4)} ${code.slice(4)}`;
+  const text = `Join me in Daily Tracker: open ${location.origin}${location.pathname} , go to Settings → Turn on sharing → Enter my partner's code: ${pretty}`;
+  openSheet(el('div', {},
+    el('h3', {}, 'Your pairing code'),
+    el('div', { class: 'code' }, pretty),
+    el('p', { class: 'muted small' }, 'Your partner opens the app, taps Settings → Turn on sharing, then “Enter my partner\'s code”. The code works for 24 hours.'),
+    el('div', { class: 'sheet-actions' },
+      navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ text }).catch(() => {}) }, 'Send via…') : null,
+      el('button', { class: 'btn primary', onclick: () => { closeSheet(); Sync.run(); } }, 'Done'),
+    ),
+  ));
+}
+function openEnterCodeSheet() {
+  const input = el('input', { type: 'text', maxlength: '12', placeholder: 'ABCD 2345', autocapitalize: 'characters', autocomplete: 'off', class: 'code-input' });
+  const go = el('button', { class: 'btn primary' }, 'Connect');
+  go.onclick = () => {
+    if (input.value.replace(/\s/g, '').length < 8) { input.focus(); return; }
+    busyDo(go, async () => {
+      await rpc('tracker_accept_invite', { p_secret: state.sync.secret, p_code: input.value });
+      await Sync.run(); closeSheet(); render(); toast(`Connected with ${Sync.partnerName}.`);
+    });
+  };
+  openSheet(el('div', {},
+    el('h3', {}, 'Enter your partner\'s code'),
+    el('div', { class: 'field' }, input),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+  ));
+}
+function showKeySheet() {
+  const key = state.sync.secret;
+  openSheet(el('div', {},
+    el('h3', {}, 'Your key'),
+    el('p', { class: 'muted small' }, 'On a new phone, choose “I already use the app on another phone” and paste this key. Keep it private: anyone with it can see and change your days.'),
+    el('div', { class: 'keybox' }, key),
+    el('div', { class: 'sheet-actions' },
+      el('button', { class: 'btn', onclick: () => { navigator.clipboard && navigator.clipboard.writeText(key).then(() => toast('Key copied.')).catch(() => {}); } }, 'Copy'),
+      el('button', { class: 'btn primary', onclick: closeSheet }, 'Done'),
+    ),
+  ));
+}
+function openUseKeySheet() {
+  const input = el('input', { type: 'text', placeholder: 'Paste your key', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
+  const go = el('button', { class: 'btn primary' }, 'Continue');
+  go.onclick = () => {
+    if (input.value.trim().length < 32) { input.focus(); return; }
+    busyDo(go, async () => { await Sync.useKey(input.value); closeSheet(); render(); toast('Your days are back on this phone.'); });
+  };
+  openSheet(el('div', {},
+    el('h3', {}, 'Use your key'),
+    el('p', { class: 'muted small' }, 'On your old phone: Settings → More options → Show my key. Your days come back on this phone.'),
+    el('div', { class: 'field' }, input),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+  ));
+}
+function confirmUnpair() {
+  const go = el('button', { class: 'btn danger' }, 'Disconnect');
+  go.onclick = () => busyDo(go, async () => { await rpc('tracker_unpair', { p_secret: state.sync.secret }); await Sync.run(); closeSheet(); render(); });
+  openSheet(el('div', {},
+    el('h3', {}, `Disconnect from ${Sync.partnerName}?`),
+    el('p', {}, 'You stop seeing each other\'s days. Your own days stay where they are. You can connect again with a new code.'),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+  ));
+}
+function confirmErase() {
+  const go = el('button', { class: 'btn danger' }, 'Erase online data');
+  go.onclick = () => busyDo(go, async () => { await Sync.erase(); closeSheet(); render(); toast('Sharing is off. Your days are still on this phone.'); });
+  openSheet(el('div', {},
+    el('h3', {}, 'Turn off sharing?'),
+    el('p', {}, 'This erases your days from the online database and disconnects your partner. Your days stay on this phone.'),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+  ));
 }
 
 /* ---------- Export / import / delete ---------- */
@@ -518,7 +756,7 @@ function download(name, text, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 function exportJson() {
-  download(`daily-tracker-backup-${todayKey()}.json`, JSON.stringify({ app: 'daily-tracker', exportedAt: new Date().toISOString(), ...state }, null, 2), 'application/json');
+  download(`daily-tracker-backup-${todayKey()}.json`, JSON.stringify({ app: 'daily-tracker', exportedAt: new Date().toISOString(), schema: state.schema, createdAt: state.createdAt, settings: state.settings, days: state.days }, null, 2), 'application/json');
 }
 function exportCsv() {
   const rows = [['date', 'food', 'mood', 'weight_kg', 'beer', 'wine', 'liquor']];
@@ -541,8 +779,11 @@ function importJson(file) {
       el('div', { class: 'sheet-actions' },
         el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
         el('button', { class: 'btn primary', onclick: () => {
-          delete data.app; delete data.exportedAt;
-          state = migrate(data); save(); closeSheet(); render(); toast('Backup restored.');
+          delete data.app; delete data.exportedAt; delete data.sync;
+          const keepSync = state.sync;
+          state = migrate(data); state.sync = keepSync;
+          if (Sync.on) for (const k of Object.keys(state.days)) state.sync.dirty[k] = new Date().toISOString();
+          save(); closeSheet(); render(); toast('Backup restored.'); Sync.run();
         } }, 'Restore'),
       ),
     ));
@@ -553,12 +794,13 @@ function confirmDeleteAll() {
   const input = el('input', { type: 'text', placeholder: 'Type DELETE', autocomplete: 'off', autocapitalize: 'characters' });
   openSheet(el('div', {},
     el('h3', {}, 'Delete all data?'),
-    el('p', {}, 'This erases every day you logged from this phone. Download a backup first if you might want it back.'),
+    el('p', {}, Sync.on ? 'This erases every day you logged, from this phone and from the online database, and turns sharing off. Download a backup first if you might want it back.' : 'This erases every day you logged from this phone. Download a backup first if you might want it back.'),
     el('div', { class: 'field' }, input),
     el('div', { class: 'sheet-actions' },
       el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
       el('button', { class: 'btn danger', onclick: async () => {
         if (input.value.trim().toUpperCase() !== 'DELETE') { input.focus(); return; }
+        if (Sync.on) { try { await Sync.erase(); } catch (e) { toast('No internet: online data not erased yet. Try again when online.'); return; } }
         state = freshState();
         await idbPut('state', state);
         try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
@@ -628,6 +870,7 @@ function bind() {
     const t = todayKey();
     if (t !== lastToday) { if (dayKey === lastToday) dayKey = t; lastToday = t; }
     render();
+    Sync.run();
   });
 }
 
@@ -636,5 +879,8 @@ function bind() {
   save();
   bind();
   render();
+  Sync.run();
+  setInterval(() => { if (!document.hidden) Sync.run(); }, 60000);
+  window.addEventListener('online', () => Sync.run());
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
