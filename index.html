@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#14181f">
-  <meta name="description" content="Personal daily log: food score, drinks and sport.">
-  <title>Daily Log</title>
+  <meta name="description" content="Daily tracker: food score and drinks, shared with your partner.">
+  <title>Daily Tracker</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -13,119 +13,72 @@
 </head>
 <body>
   <header class="topbar">
-    <button class="nav-btn" id="prevDay" aria-label="Previous day">‹</button>
+    <button class="nav-btn" id="prev" aria-label="Previous">‹</button>
     <div class="date-block">
-      <div class="date-main" id="dateLabel">Today</div>
-      <button class="date-sub" id="todayBtn" hidden>Back to today</button>
+      <div class="date-main" id="title">Today</div>
+      <button class="date-sub" id="backBtn" hidden>Back to today</button>
     </div>
-    <button class="nav-btn" id="nextDay" aria-label="Next day">›</button>
+    <button class="nav-btn" id="next" aria-label="Next">›</button>
   </header>
 
   <main>
     <!-- DAY -->
     <section class="view" id="view-day">
       <div class="card">
-        <div class="card-head"><h2>Food</h2><span class="muted" id="foodHint">How did you eat today?</span></div>
+        <div class="card-head"><h2>Food</h2><span class="muted" id="foodHint"></span></div>
         <div class="food-row" id="foodRow"></div>
         <p class="anchor" id="foodAnchor"></p>
       </div>
 
       <div class="card">
         <div class="card-head"><h2>Drinks</h2><span class="muted" id="drinkSummary"></span></div>
-        <div class="drink-grid" id="drinkGrid"></div>
-        <p class="muted small">Tap a tile to add a drink. Tap − to remove one.</p>
+        <div class="counters" id="counters"></div>
       </div>
 
-      <div class="card">
-        <div class="card-head"><h2>Sport</h2><span class="muted" id="sportSummary"></span></div>
-        <ul class="sport-list" id="sportList"></ul>
-        <button class="btn primary wide" id="addSportBtn">+ Add sport</button>
-      </div>
+      <div class="card partner-card" id="partnerToday" hidden></div>
     </section>
 
-    <!-- WEEK -->
-    <section class="view" id="view-week" hidden>
-      <div class="week-nav">
-        <button class="nav-btn" id="prevWeek" aria-label="Previous week">‹</button>
-        <div class="week-label" id="weekLabel"></div>
-        <button class="nav-btn" id="nextWeek" aria-label="Next week">›</button>
+    <!-- OVERVIEW -->
+    <section class="view" id="view-overview" hidden>
+      <div class="seg" id="periodSeg">
+        <button data-v="week">Week</button><button data-v="month">Month</button><button data-v="year">Year</button>
       </div>
-
-      <div class="card">
-        <h2>Food</h2>
-        <div class="week-food" id="weekFood"></div>
-        <p class="muted small" id="weekFoodAvg"></p>
+      <div class="seg who" id="whoSeg" hidden>
+        <button data-v="me">Me</button><button data-v="both">Both</button><button data-v="partner">Partner</button>
       </div>
-
-      <div class="card">
-        <h2>Sport</h2>
-        <div class="rings">
-          <div class="ring-box"><div class="ring" id="ringMinutes"></div><div class="ring-cap">minutes<br><span class="muted">goal 150</span></div></div>
-          <div class="ring-box"><div class="ring" id="ringStrength"></div><div class="ring-cap">strength sessions<br><span class="muted">goal 2</span></div></div>
-        </div>
-        <p class="muted small">Dutch movement guideline: 150+ minutes of moderate activity a week, and muscle-strengthening at least twice.</p>
-      </div>
-
-      <div class="card">
-        <h2>Drinks</h2>
-        <div class="bars" id="drinkBars"></div>
-        <div class="stats" id="drinkStats"></div>
-        <p class="muted small">Tracking only, no goal. The dashed line is the Gezondheidsraad's "at most 1 glass a day". 1 standard glass ≈ 10 g alcohol.</p>
-      </div>
-
-      <div class="card">
-        <h2>Last 12 weeks</h2>
-        <div class="heat" id="heat"></div>
-        <p class="muted small">Food score per day. Tap a day to open it.</p>
-      </div>
+      <div id="overview"></div>
     </section>
 
     <!-- SETTINGS -->
     <section class="view" id="view-settings" hidden>
-      <div class="card">
-        <h2>Drink presets</h2>
-        <p class="muted small">Change size, alcohol % or kcal per glass. Changes apply to new drinks only; past days keep their numbers.</p>
-        <div id="presetList"></div>
-        <button class="btn wide" id="addPresetBtn">+ Add custom drink</button>
-      </div>
-
-      <div class="card">
-        <h2>Training places</h2>
-        <p class="muted small">Used later by the workout generator, so it only suggests what you can do where you are.</p>
-        <div id="locationList"></div>
-      </div>
-
-      <div class="card">
-        <h2>Heavy drinking day</h2>
-        <p class="muted small">The Dutch definition is 6+ glasses in a day for men, 4+ for women. Pick the one that applies to you.</p>
-        <div class="seg" id="heavySeg">
-          <button data-v="4">4+ glasses</button><button data-v="6">6+ glasses</button>
-        </div>
-      </div>
+      <div class="card" id="shareCard"></div>
 
       <div class="card">
         <h2>Your data</h2>
-        <p class="muted small" id="storageInfo">Everything is stored only on this phone.</p>
+        <p class="muted small" id="storageInfo"></p>
         <button class="btn wide" id="exportJson">Download backup (JSON)</button>
         <button class="btn wide" id="exportCsv">Download spreadsheet (CSV)</button>
         <label class="btn wide file-btn">Restore from backup<input type="file" id="importFile" accept="application/json,.json" hidden></label>
         <button class="btn danger wide" id="deleteAll">Delete all data</button>
+      </div>
+
+      <div class="card">
+        <h2>Food score guide</h2>
+        <ol class="guide" id="foodGuide"></ol>
       </div>
       <p class="muted small center" id="versionInfo"></p>
     </section>
   </main>
 
   <nav class="tabbar">
-    <button data-view="day" class="active"><span class="ti">●</span>Day</button>
-    <button data-view="week"><span class="ti">▦</span>Week</button>
+    <button data-view="day" class="active"><span class="ti">●</span>Today</button>
+    <button data-view="overview"><span class="ti">▦</span>Overview</button>
     <button data-view="settings"><span class="ti">⚙</span>Settings</button>
   </nav>
 
-  <!-- Sheet for adding sport / editing -->
   <div class="sheet-backdrop" id="sheetBackdrop" hidden>
     <div class="sheet" role="dialog" aria-modal="true" id="sheet"></div>
   </div>
-
   <div class="toast" id="toast" hidden></div>
 
   <script src="app.js"></script>

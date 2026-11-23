@@ -1,7 +1,7 @@
 {
-  "name": "Daily Log",
-  "short_name": "Daily Log",
-  "description": "Food score, drinks and sport, stored on your phone.",
+  "name": "Daily Tracker",
+  "short_name": "Tracker",
+  "description": "Food score and drinks per day, shared with your partner.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
