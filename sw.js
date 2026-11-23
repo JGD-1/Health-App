@@ -1,5 +1,5 @@
 /* Offline cache for the app shell. Bump CACHE when files change so phones pick up the new version. */
-const CACHE = 'daily-tracker-v2.4.0';
+const CACHE = 'daily-tracker-v2.5.0';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'i18n.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {

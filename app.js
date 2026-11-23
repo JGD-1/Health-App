@@ -2,7 +2,7 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 const VAPID_PUBLIC = 'BGDrlOvXvSGbsm_TN3JPTtLm4LiTMAoMRHi9E4iH0XVlDueHdl6VzO3bSB5c0_e1-2YoR3lvN3E2YDiEtw1mMgk';
 const SUPABASE_URL = 'https://fvwdcyucxiiycdefqxtf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XwWKCUSP5-DFqJD-Q9ZUpw_KeYwGibY'; // public key; data is protected by each phone's secret key
@@ -380,14 +380,16 @@ function renderDay() {
 
   const c = $('#counters');
   c.innerHTML = '';
+  const change = (id, delta) => { updateDay(dayKey, y => { y[id] = Math.min(50, Math.max(0, (y[id] || 0) + delta)); }); renderDay(); };
   for (const x of DRINKS) {
     const n = d[x.id] || 0;
-    c.append(el('div', { class: 'counter' },
-      el('span', { class: 'ci' }, x.icon),
-      el('div', { class: 'cx' }, el('b', {}, tr(x.name)), el('span', { class: 'muted small' }, tr(x.hint))),
-      el('button', { class: 'cb', 'aria-label': `− ${tr(x.name)}`, disabled: n === 0, onclick: () => { updateDay(dayKey, y => { y[x.id] = Math.max(0, (y[x.id] || 0) - 1); }); renderDay(); } }, '−'),
-      el('span', { class: `cn${n ? ' on' : ''}` }, String(n)),
-      el('button', { class: 'cb plus', 'aria-label': `+ ${tr(x.name)}`, onclick: () => { updateDay(dayKey, y => { y[x.id] = Math.min(50, (y[x.id] || 0) + 1); }); renderDay(); } }, '+'),
+    c.append(el('div', { class: `drink-tile${n ? ' on' : ''}`, title: `${tr(x.name)} (${tr(x.hint)})` },
+      el('button', { class: 'dt-icon', 'aria-label': `+ ${tr(x.name)}`, onclick: () => change(x.id, 1) },
+        el('span', { class: 'dt-emoji' }, x.icon),
+        n ? el('span', { class: 'dt-count' }, String(n)) : null),
+      el('div', { class: 'dt-ctrl' },
+        el('button', { class: 'dt-btn', 'aria-label': `− ${tr(x.name)}`, disabled: n === 0, onclick: () => change(x.id, -1) }, '−'),
+        el('button', { class: 'dt-btn plus', 'aria-label': `+ ${tr(x.name)}`, onclick: () => change(x.id, 1) }, '+')),
     ));
   }
   const total = drinksOf(d);

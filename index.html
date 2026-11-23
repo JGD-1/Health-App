@@ -9,6 +9,9 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -89,9 +92,9 @@
   </main>
 
   <nav class="tabbar">
-    <button data-view="day" class="active"><span class="ti">●</span><span data-t>Today</span></button>
-    <button data-view="overview"><span class="ti">▦</span><span data-t>Overview</span></button>
-    <button data-view="settings"><span class="ti">⚙</span><span data-t>Settings</span></button>
+    <button data-view="day" class="active"><span class="ti"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/><circle cx="12" cy="12" r="4"/></svg></span><span data-t>Today</span></button>
+    <button data-view="overview"><span class="ti"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></svg></span><span data-t>Overview</span></button>
+    <button data-view="settings"><span class="ti"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span><span data-t>Settings</span></button>
   </nav>
 
   <div class="sheet-backdrop" id="sheetBackdrop" hidden>
