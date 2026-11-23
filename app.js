@@ -2,7 +2,7 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const SCHEMA = 2;
 
 const DRINKS = [
@@ -19,11 +19,20 @@ const FOOD_ANCHORS = {
   1: 'Off the rails all day.',
 };
 
+const MOODS = {
+  1: { icon: '😞', label: 'Bad day' },
+  2: { icon: '😕', label: 'Not great' },
+  3: { icon: '😐', label: 'Okay' },
+  4: { icon: '🙂', label: 'Good' },
+  5: { icon: '😄', label: 'Great' },
+};
+const METRICS = { food: 'Food', mood: 'Mood' };
+
 function freshState() {
   return {
     schema: SCHEMA,
     createdAt: new Date().toISOString(),
-    // days['YYYY-MM-DD'] = { food: 1..5|null, beer, wine, liquor, u: ISO time of last change }
+    // days['YYYY-MM-DD'] = { food: 1..5|null, mood: 1..5|null, weight: kg|null, beer, wine, liquor, u: ISO time of last change }
     days: {},
     settings: { name: '' },
   };
@@ -84,11 +93,12 @@ function migrate(s) {
     for (const [k, d] of Object.entries(s.days || {})) {
       const n = { food: d.food ?? null, beer: 0, wine: 0, liquor: 0, u: new Date().toISOString() };
       for (const x of d.drinks || []) n[drinkKind(x)]++;
-      if (n.food != null || n.beer || n.wine || n.liquor) days[k] = n;
+      if (n.food != null || n.beer || n.wine || n.liquor) days[k] = { mood: null, weight: null, ...n };
     }
     s = { ...freshState(), days, legacyV1: { sport: Object.fromEntries(Object.entries(s.days || {}).filter(([, d]) => d.sport && d.sport.length).map(([k, d]) => [k, d.sport])) } };
   }
   s.days = s.days || {};
+  for (const d of Object.values(s.days)) { if (d.mood === undefined) d.mood = null; if (d.weight === undefined) d.weight = null; }
   s.settings = Object.assign({ name: '' }, s.settings || {});
   return s;
 }
@@ -128,14 +138,14 @@ const fmtMonth = d => d.toLocaleDateString('en-GB', { month: 'long', year: 'nume
 const fmt1 = n => (Math.round(n * 10) / 10).toLocaleString('en-GB');
 
 /* ---------- Domain ---------- */
-const EMPTY = Object.freeze({ food: null, beer: 0, wine: 0, liquor: 0 });
+const EMPTY = Object.freeze({ food: null, mood: null, weight: null, beer: 0, wine: 0, liquor: 0 });
 const myDay = k => state.days[k] || EMPTY;
 const drinksOf = d => (d.beer || 0) + (d.wine || 0) + (d.liquor || 0);
 function updateDay(k, fn) {
   const d = { ...EMPTY, ...(state.days[k] || {}) };
   fn(d);
   d.u = new Date().toISOString();
-  if (d.food == null && !drinksOf(d)) delete state.days[k]; else state.days[k] = d;
+  if (d.food == null && d.mood == null && d.weight == null && !drinksOf(d)) delete state.days[k]; else state.days[k] = d;
   save();
   Sync.dayChanged(k, state.days[k] || null);
 }
@@ -144,6 +154,8 @@ function summarise(keys, days) {
   const t = todayKey();
   const past = keys.filter(k => k <= t);
   const rated = past.map(k => (days[k] || EMPTY).food).filter(Boolean);
+  const moods = past.map(k => (days[k] || EMPTY).mood).filter(Boolean);
+  const weights = past.map(k => (days[k] || EMPTY).weight).filter(w => w != null);
   const sum = { beer: 0, wine: 0, liquor: 0 };
   let free = 0, logged = 0;
   for (const k of past) {
@@ -156,6 +168,8 @@ function summarise(keys, days) {
   return {
     days: past.length, rated: rated.length,
     avgFood: rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null,
+    avgMood: moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null, moodDays: moods.length,
+    weightFirst: weights.length ? weights[0] : null, weightLast: weights.length ? weights[weights.length - 1] : null,
     ...sum, drinks: sum.beer + sum.wine + sum.liquor, free, logged,
   };
 }
@@ -176,7 +190,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const foodColor = f => f ? `var(--s${f})` : 'var(--empty)';
 // One cell for "me", or split left/right for "both"
 function cellBg(k, who) {
-  const a = myDay(k).food, b = (Sync.partnerDays[k] || EMPTY).food;
+  const a = myDay(k)[metric], b = (Sync.partnerDays[k] || EMPTY)[metric];
   if (who === 'me') return foodColor(a);
   if (who === 'partner') return foodColor(b);
   return `linear-gradient(90deg, ${foodColor(a)} 50%, ${foodColor(b)} 50%)`;
@@ -187,6 +201,7 @@ let view = 'day';
 let dayKey = todayKey();
 let period = 'week';
 let who = 'me';
+let metric = 'food'; // which score colours the overview: 'food' or 'mood'
 let anchor = new Date(); // any date inside the shown week / month / year
 
 /* ---------- Header ---------- */
@@ -222,19 +237,39 @@ function renderHeader() {
 }
 
 /* ---------- Today ---------- */
-function renderDay() {
+function scoreRow(row, field, label, content) {
   const d = myDay(dayKey);
-  const row = $('#foodRow');
   row.innerHTML = '';
-  row.classList.toggle('unset', d.food == null);
+  row.classList.toggle('unset', d[field] == null);
   for (let s = 1; s <= 5; s++) {
     row.append(el('button', {
-      class: `food-tile c${s}${d.food === s ? ' sel' : ''}`, 'aria-label': `Food score ${s}`, 'aria-pressed': String(d.food === s),
-      onclick: () => { updateDay(dayKey, x => { x.food = x.food === s ? null : s; }); renderDay(); },
-    }, String(s)));
+      class: `food-tile c${s}${d[field] === s ? ' sel' : ''}`, 'aria-label': `${label} ${s}`, 'aria-pressed': String(d[field] === s),
+      onclick: () => { updateDay(dayKey, x => { x[field] = x[field] === s ? null : s; }); renderDay(); },
+    }, content(s)));
   }
+}
+const lastWeightBefore = k => { const ks = Object.keys(state.days).filter(x => x <= k && state.days[x].weight != null).sort(); return ks.length ? state.days[ks[ks.length - 1]].weight : null; };
+const fmtKg = w => `${w.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg`;
+
+function renderDay() {
+  const d = myDay(dayKey);
+  scoreRow($('#foodRow'), 'food', 'Food score', s => String(s));
   $('#foodAnchor').textContent = d.food ? `${d.food}: ${FOOD_ANCHORS[d.food]}` : '';
   $('#foodHint').textContent = d.food ? 'Tap again to clear' : 'How did you eat?';
+  scoreRow($('#moodRow'), 'mood', 'Mood', s => el('span', { class: 'mood-face' }, MOODS[s].icon, el('small', {}, String(s))));
+  $('#moodAnchor').textContent = d.mood ? `${d.mood}: ${MOODS[d.mood].label}` : '';
+  $('#moodHint').textContent = d.mood ? 'Tap again to clear' : 'How did you feel?';
+
+  const prevW = lastWeightBefore(ymd(addDays(parseYmd(dayKey), -1)));
+  const wv = $('#weightValue');
+  wv.innerHTML = '';
+  if (d.weight != null) {
+    const diff = prevW != null ? Math.round((d.weight - prevW) * 10) / 10 : null;
+    wv.append(el('b', { class: 'wbig' }, fmtKg(d.weight)), diff ? el('span', { class: 'muted small' }, ` ${diff > 0 ? '+' : ''}${fmt1(diff)} since last`) : null);
+  } else {
+    wv.append(el('span', { class: 'muted' }, prevW != null ? `Not weighed · last ${fmtKg(prevW)}` : 'Not weighed'));
+  }
+  $('#weightBtn').textContent = d.weight != null ? 'Change' : 'Add weight';
 
   const c = $('#counters');
   c.innerHTML = '';
@@ -259,11 +294,35 @@ function renderDay() {
     pc.append(
       el('div', { class: 'card-head' }, el('h2', {}, Sync.partnerName || 'Partner'), el('span', { class: 'muted small' }, 'same day')),
       el('div', { class: 'partner-row' },
-        el('div', { class: `mini-tile${p.food ? ' c' + p.food : ''}` }, p.food ? String(p.food) : '–'),
+        el('div', { class: `mini-tile${p.food ? ' c' + p.food : ''}`, title: 'Food' }, p.food ? String(p.food) : '–'),
+        el('div', { class: `mini-tile${p.mood ? ' c' + p.mood : ''}`, title: 'Mood' }, p.mood ? MOODS[p.mood].icon : '–'),
         el('div', {}, drinksOf(p) ? DRINKS.filter(x => p[x.id]).map(x => `${x.icon} ${p[x.id]}`).join('   ') : el('span', { class: 'muted' }, 'No drinks')),
       ),
     );
   }
+}
+
+function openWeightSheet() {
+  const d = myDay(dayKey);
+  const start = d.weight ?? lastWeightBefore(dayKey) ?? '';
+  const input = el('input', { type: 'number', inputmode: 'decimal', step: '0.1', min: '20', max: '400', value: start === '' ? '' : String(start), placeholder: 'kg' });
+  const nudge = n => { const v = Number(input.value) || 0; input.value = (Math.round((v + n) * 10) / 10).toFixed(1); };
+  openSheet(el('div', {},
+    el('h3', {}, 'Weight'),
+    el('p', { class: 'muted small' }, 'Tip: weigh at the same moment each day, e.g. in the morning before breakfast.'),
+    el('div', { class: 'field' }, el('div', { class: 'wrow' },
+      el('button', { class: 'cb', type: 'button', onclick: () => nudge(-0.1) }, '−'), input, el('button', { class: 'cb plus', type: 'button', onclick: () => nudge(0.1) }, '+'))),
+    el('div', { class: 'sheet-actions' },
+      d.weight != null ? el('button', { class: 'btn danger', onclick: () => { updateDay(dayKey, x => { x.weight = null; }); closeSheet(); renderDay(); } }, 'Clear') : null,
+      el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+      el('button', { class: 'btn primary', onclick: () => {
+        const v = Math.round(Number(String(input.value).replace(',', '.')) * 10) / 10;
+        if (!(v >= 20 && v <= 400)) { input.focus(); return; }
+        updateDay(dayKey, x => { x.weight = v; }); closeSheet(); renderDay();
+      } }, 'Save'),
+    ),
+  ));
+  setTimeout(() => input.focus(), 50);
 }
 
 /* ---------- Overview ---------- */
@@ -275,7 +334,10 @@ function statsBlock(label, s, showLabel) {
     showLabel ? el('div', { class: 'sp-name' }, label) : null,
     el('div', { class: 'stats' },
       el('div', { class: 'stat' }, el('b', {}, s.avgFood != null ? fmt1(s.avgFood) : '–'), el('span', {}, `avg food (${s.rated}/${s.days} days)`)),
+      el('div', { class: 'stat' }, el('b', {}, s.avgMood != null ? fmt1(s.avgMood) : '–'), el('span', {}, `avg mood (${s.moodDays}/${s.days} days)`)),
       el('div', { class: 'stat' }, el('b', {}, `${s.free}/${s.logged}`), el('span', {}, 'alcohol-free (of days logged)')),
+      el('div', { class: 'stat' }, el('b', {}, s.weightLast != null ? fmtKg(s.weightLast) : '–'),
+        el('span', {}, s.weightLast != null && s.weightFirst != null && s.weightLast !== s.weightFirst ? `weight, ${s.weightLast > s.weightFirst ? '+' : ''}${fmt1(s.weightLast - s.weightFirst)} kg in this period` : 'latest weight')),
       el('div', { class: 'stat wide' }, el('b', {}, drinkLine(s)), el('span', {}, `${s.drinks} drinks in total`)),
     ),
   );
@@ -289,6 +351,43 @@ function statsCard(keys) {
   const ps = people();
   return el('div', { class: 'card' }, el('h2', {}, 'Summary'), ps.map(p => statsBlock(p.label, summarise(keys, p.days), ps.length > 1)));
 }
+function metricSeg() {
+  const w = el('div', { class: 'seg mini' });
+  for (const [k, label] of Object.entries(METRICS)) w.append(el('button', { class: k === metric ? 'on' : '', onclick: () => { metric = k; render(); } }, label));
+  return w;
+}
+function cardHead(title) { return el('div', { class: 'card-head' }, el('h2', {}, title), metricSeg()); }
+// Weight line chart for the given keys (one line per person shown)
+function weightCard(keys) {
+  const ps = people();
+  const series = ps.map((p, i) => ({ label: p.label, cls: i === 0 && who !== 'partner' ? 'w-me' : 'w-partner', pts: keys.map((k, x) => [x, (p.days[k] || EMPTY).weight]).filter(([, w]) => w != null) }));
+  const all = series.flatMap(s => s.pts.map(p => p[1]));
+  const card = el('div', { class: 'card' }, el('h2', {}, 'Weight'));
+  if (!all.length) { card.append(el('p', { class: 'muted small' }, 'No weight logged in this period.')); return card; }
+  const W = 320, H = 140, P = 28;
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (hi - lo < 2) { const mid = (hi + lo) / 2; lo = mid - 1; hi = mid + 1; }
+  const X = x => P + (keys.length > 1 ? x / (keys.length - 1) : 0.5) * (W - P - 8);
+  const Y = w => 8 + (1 - (w - lo) / (hi - lo)) * (H - 24);
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'wchart');
+  const add = (tag, attrs, text) => { const n = document.createElementNS(NS, tag); for (const [a, v] of Object.entries(attrs)) n.setAttribute(a, v); if (text != null) n.textContent = text; svg.append(n); return n; };
+  for (const v of [lo, (lo + hi) / 2, hi]) {
+    add('line', { x1: P, x2: W - 8, y1: Y(v), y2: Y(v), class: 'grid' });
+    add('text', { x: P - 4, y: Y(v) + 3, class: 'axis', 'text-anchor': 'end' }, fmt1(v));
+  }
+  add('text', { x: P, y: H - 2, class: 'axis' }, fmtShort(parseYmd(keys[0])));
+  add('text', { x: W - 8, y: H - 2, class: 'axis', 'text-anchor': 'end' }, fmtShort(parseYmd(keys[keys.length - 1])));
+  for (const s of series) {
+    if (s.pts.length > 1) add('polyline', { points: s.pts.map(([x, w]) => `${X(x)},${Y(w)}`).join(' '), class: `wl ${s.cls}` });
+    for (const [x, w] of s.pts) add('circle', { cx: X(x), cy: Y(w), r: keys.length > 60 ? 1.6 : 3, class: `wd ${s.cls}` });
+  }
+  card.append(svg);
+  if (series.length > 1) card.append(el('p', { class: 'muted small' }, el('span', { class: 'key w-me' }), ` ${series[0].label}   `, el('span', { class: 'key w-partner' }), ` ${series[1].label}`));
+  return card;
+}
+
 function legend() {
   if (who !== 'both') return null;
   return el('p', { class: 'muted small' }, `Left half: ${state.settings.name || 'you'} · right half: ${Sync.partnerName || 'partner'}`);
@@ -302,15 +401,16 @@ function renderWeek(box) {
   keys.forEach((k, i) => {
     const d = who === 'partner' ? (Sync.partnerDays[k] || EMPTY) : myDay(k);
     const n = drinksOf(d) + (who === 'both' ? drinksOf(Sync.partnerDays[k] || EMPTY) : 0);
-    const food = who === 'both' ? null : d.food;
+    const sc = who === 'both' ? null : d[metric];
+    const food = sc == null ? null : metric === 'mood' ? MOODS[sc].icon : String(sc);
     const drinkText = !n ? '' : who === 'both' ? `${n} drinks` : DRINKS.filter(x => d[x.id]).map(x => `${x.icon}${d[x.id]}`).join(' ');
     grid.append(el('div', { class: `wf${k === t ? ' today' : ''}${k > t ? ' future' : ''}`, onclick: k > t ? null : () => openDay(k) },
-      el('div', { class: 'wt', style: `background:${cellBg(k, who)}` }, food ? String(food) : ''),
+      el('div', { class: 'wt', style: `background:${cellBg(k, who)}` }, food || ''),
       el('div', { class: 'wd' }, DAY_SHORT[i]),
       el('div', { class: 'wdr' }, drinkText),
     ));
   });
-  box.append(el('div', { class: 'card' }, el('h2', {}, 'Food and drinks'), grid, legend()), statsCard(keys));
+  box.append(el('div', { class: 'card' }, cardHead('Your week'), grid, legend()), weightCard(keys), statsCard(keys));
 }
 
 function renderMonth(box) {
@@ -333,9 +433,9 @@ function renderMonth(box) {
     }, el('span', { class: 'cal-n' }, String(day)), drinks ? el('span', { class: 'cal-x' }, String(drinks)) : null));
   }
   box.append(el('div', { class: 'card' },
-    el('h2', {}, 'Calendar'), grid,
-    el('p', { class: 'muted small' }, 'Colour = food score. Small number = drinks that day.'), legend(),
-  ), statsCard(keys));
+    cardHead('Calendar'), grid,
+    el('p', { class: 'muted small' }, `Colour = ${METRICS[metric].toLowerCase()} score. Small number = drinks that day.`), legend(),
+  ), weightCard(keys), statsCard(keys));
 }
 
 function renderYear(box) {
@@ -360,21 +460,23 @@ function renderYear(box) {
   // Per-month table
   const ps = people();
   const table = el('table', { class: 'mt' },
-    el('thead', {}, el('tr', {}, el('th', {}, ''), ps.length > 1 ? el('th', {}, '') : null, el('th', {}, 'Food'), el('th', {}, 'Drinks'), el('th', {}, 'Dry days'))),
+    el('thead', {}, el('tr', {}, el('th', {}, ''), ps.length > 1 ? el('th', {}, '') : null, el('th', {}, 'Food'), el('th', {}, 'Mood'), el('th', {}, 'Drinks'), el('th', {}, 'Dry'))),
     el('tbody', {}, rows.filter(r => r.keys[0] <= t).flatMap(r => ps.map((p, i) => {
       const s = summarise(r.keys, p.days);
       return el('tr', { class: i === ps.length - 1 ? 'last' : '', onclick: () => { anchor = new Date(y, r.m, 1); period = 'month'; render(); } },
         el('td', {}, i === 0 ? MONTH_SHORT[r.m] : ''),
         ps.length > 1 ? el('td', { class: 'muted' }, p.label) : null,
         el('td', {}, s.avgFood != null ? el('span', { class: `pill c${Math.round(s.avgFood)}` }, fmt1(s.avgFood)) : '–'),
+        el('td', {}, s.avgMood != null ? el('span', { class: `pill c${Math.round(s.avgMood)}` }, fmt1(s.avgMood)) : '–'),
         el('td', {}, String(s.drinks)),
         el('td', {}, s.logged ? `${s.free}/${s.logged}` : '–'),
       );
     }))),
   );
   box.append(
-    el('div', { class: 'card' }, el('h2', {}, 'Every day of the year'), grid, el('p', { class: 'muted small' }, 'One row per month, one square per day, coloured by food score. Tap a month to open it.'), legend()),
+    el('div', { class: 'card' }, cardHead('Every day'), grid, el('p', { class: 'muted small' }, `One row per month, one square per day, coloured by ${METRICS[metric].toLowerCase()} score. Tap a month to open it.`), legend()),
     el('div', { class: 'card' }, el('h2', {}, 'Per month'), table),
+    weightCard(allKeys.filter(k => k <= t)),
     statsCard(allKeys),
   );
 }
@@ -419,10 +521,10 @@ function exportJson() {
   download(`daily-tracker-backup-${todayKey()}.json`, JSON.stringify({ app: 'daily-tracker', exportedAt: new Date().toISOString(), ...state }, null, 2), 'application/json');
 }
 function exportCsv() {
-  const rows = [['date', 'food', 'beer', 'wine', 'liquor']];
+  const rows = [['date', 'food', 'mood', 'weight_kg', 'beer', 'wine', 'liquor']];
   for (const k of Object.keys(state.days).sort()) {
     const d = state.days[k];
-    rows.push([k, d.food ?? '', d.beer || 0, d.wine || 0, d.liquor || 0]);
+    rows.push([k, d.food ?? '', d.mood ?? '', d.weight ?? '', d.beer || 0, d.wine || 0, d.liquor || 0]);
   }
   download(`daily-tracker-${todayKey()}.csv`, rows.map(r => r.join(',')).join('\n'), 'text/csv');
 }
@@ -517,6 +619,7 @@ function bind() {
   $('#exportCsv').onclick = exportCsv;
   $('#importFile').onchange = (e) => { const f = e.target.files[0]; if (f) importJson(f); e.target.value = ''; };
   $('#deleteAll').onclick = confirmDeleteAll;
+  $('#weightBtn').onclick = openWeightSheet;
   document.querySelectorAll('.tabbar button').forEach(b => b.onclick = () => setView(b.dataset.view));
   $('#sheetBackdrop').addEventListener('click', (e) => { if (e.target.id === 'sheetBackdrop') closeSheet(); });
   let lastToday = todayKey();
