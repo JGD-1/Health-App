@@ -1,6 +1,6 @@
 /* Offline cache for the app shell. Bump CACHE when files change so phones pick up the new version. */
-const CACHE = 'daily-tracker-v2.3.0';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'];
+const CACHE = 'daily-tracker-v2.4.0';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'i18n.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -22,7 +22,7 @@ self.addEventListener('fetch', (e) => {
 
 // Reminder notifications sent by the server (Supabase edge function "send-reminders")
 self.addEventListener('push', (e) => {
-  let data = { title: 'Daily Tracker', body: 'Time to fill in your day.' };
+  let data = { title: 'Dagtracker', body: 'Tijd om je dag in te vullen.' };
   try { if (e.data) data = Object.assign(data, e.data.json()); } catch (err) { /* plain text */ }
   e.waitUntil(self.registration.showNotification(data.title, {
     body: data.body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: data.kind || 'reminder', renotify: true,

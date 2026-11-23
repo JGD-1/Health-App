@@ -2,7 +2,7 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 const VAPID_PUBLIC = 'BGDrlOvXvSGbsm_TN3JPTtLm4LiTMAoMRHi9E4iH0XVlDueHdl6VzO3bSB5c0_e1-2YoR3lvN3E2YDiEtw1mMgk';
 const SUPABASE_URL = 'https://fvwdcyucxiiycdefqxtf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XwWKCUSP5-DFqJD-Q9ZUpw_KeYwGibY'; // public key; data is protected by each phone's secret key
@@ -29,7 +29,7 @@ const MOODS = {
   4: { icon: '🙂', label: 'Good' },
   5: { icon: '😄', label: 'Great' },
 };
-const METRICS = { food: 'Food', mood: 'Mood' };
+const METRICS = { food: 'Food', mood: 'Mood' }; // labels go through tr()
 
 function freshState() {
   return {
@@ -107,7 +107,7 @@ function migrate(s) {
   }
   s.days = s.days || {};
   for (const d of Object.values(s.days)) { if (d.mood === undefined) d.mood = null; if (d.weight === undefined) d.weight = null; }
-  s.settings = Object.assign({ name: '' }, s.settings || {});
+  s.settings = Object.assign({ name: '', lang: 'nl' }, s.settings || {});
   s.settings.reminders = Object.assign({ daily_on: false, daily_time: '21:00', weight_on: false, weight_dow: 1, weight_time: '08:00' }, s.settings.reminders || {});
   s.sync = Object.assign(freshSync(), s.sync || {});
   return s;
@@ -188,7 +188,7 @@ const Sync = {
       if (me.partner) {
         const days = {};
         for (const r of res.partner) days[r.day] = { food: r.food, mood: r.mood, weight: r.weight == null ? null : Number(r.weight), beer: r.beer, wine: r.wine, liquor: r.liquor };
-        state.sync.partner = { name: me.partner.name || 'Partner', shareWeight: !!me.partner.share_weight, days };
+        state.sync.partner = { name: me.partner.name || tr('Partner'), shareWeight: !!me.partner.share_weight, days };
       } else state.sync.partner = null;
       state.sync.lastSync = new Date().toISOString();
       this.error = '';
@@ -201,10 +201,10 @@ const Sync = {
     if ($('#sheetBackdrop').hidden) render();
   },
   statusText() {
-    if (this.busy) return 'Syncing…';
-    if (this.error === 'offline') return 'Offline. Changes are saved on this phone and sync later.';
-    if (this.error) return `Sync problem: ${this.error}`;
-    if (state.sync.lastSync) return `Last synced ${new Date(state.sync.lastSync).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+    if (this.busy) return tr('Syncing…');
+    if (this.error === 'offline') return tr('Offline. Changes are saved on this phone and sync later.');
+    if (this.error) return tr('Sync problem: {e}', { e: this.error });
+    if (state.sync.lastSync) return tr('Last synced {t}', { t: new Date(state.sync.lastSync).toLocaleTimeString(LOC(), { hour: '2-digit', minute: '2-digit' }) });
     return '';
   },
   async start(name) {
@@ -236,12 +236,12 @@ const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const todayKey = () => ymd(new Date());
 const mondayOf = d => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); return addDays(x, -((x.getDay() + 6) % 7)); };
 const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
-const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const fmtLong = d => d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-const fmtShort = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-const fmtMonth = d => d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-const fmt1 = n => (Math.round(n * 10) / 10).toLocaleString('en-GB');
+const DAY_SHORT_ = { en: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], nl: ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'] };
+const MONTH_SHORT_ = { en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], nl: ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'] };
+const fmtLong = d => d.toLocaleDateString(LOC(), { weekday: 'long', day: 'numeric', month: 'long' });
+const fmtShort = d => d.toLocaleDateString(LOC(), { day: 'numeric', month: 'short' });
+const fmtMonth = d => d.toLocaleDateString(LOC(), { month: 'long', year: 'numeric' });
+const fmt1 = n => (Math.round(n * 10) / 10).toLocaleString(LOC());
 
 /* ---------- Domain ---------- */
 const EMPTY = Object.freeze({ food: null, mood: null, weight: null, beer: 0, wine: 0, liquor: 0 });
@@ -318,7 +318,7 @@ function renderHeader() {
   back.hidden = true;
   if (view === 'day') {
     const d = parseYmd(dayKey);
-    title.textContent = dayKey === t ? `Today · ${fmtShort(d)}` : dayKey === ymd(addDays(new Date(), -1)) ? `Yesterday · ${fmtShort(d)}` : fmtLong(d);
+    title.textContent = dayKey === t ? `${tr('Today')} · ${fmtShort(d)}` : dayKey === ymd(addDays(new Date(), -1)) ? `${tr('Yesterday')} · ${fmtShort(d)}` : fmtLong(d);
     back.hidden = dayKey === t;
     next.disabled = dayKey >= t;
   } else if (view === 'overview') {
@@ -335,11 +335,11 @@ function renderHeader() {
       next.disabled = anchor.getFullYear() >= now.getFullYear();
     }
     back.hidden = next.disabled;
-    back.textContent = 'Back to now';
+    back.textContent = tr('Back to now');
   } else {
-    title.textContent = 'Settings';
+    title.textContent = tr('Settings');
   }
-  if (view === 'day') back.textContent = 'Back to today';
+  if (view === 'day') back.textContent = tr('Back to today');
 }
 
 /* ---------- Today ---------- */
@@ -355,27 +355,28 @@ function scoreRow(row, field, label, content) {
   }
 }
 const lastWeightBefore = k => { const ks = Object.keys(state.days).filter(x => x <= k && state.days[x].weight != null).sort(); return ks.length ? state.days[ks[ks.length - 1]].weight : null; };
-const fmtKg = w => `${w.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg`;
+const fmtKg = w => `${w.toLocaleString(LOC(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg`;
 
 function renderDay() {
   const d = myDay(dayKey);
-  scoreRow($('#foodRow'), 'food', 'Food score', s => String(s));
-  $('#foodAnchor').textContent = d.food ? `${d.food}: ${FOOD_ANCHORS[d.food]}` : '';
-  $('#foodHint').textContent = d.food ? 'Tap again to clear' : 'How did you eat?';
-  scoreRow($('#moodRow'), 'mood', 'Mood', s => el('span', { class: 'mood-face' }, MOODS[s].icon, el('small', {}, String(s))));
-  $('#moodAnchor').textContent = d.mood ? `${d.mood}: ${MOODS[d.mood].label}` : '';
-  $('#moodHint').textContent = d.mood ? 'Tap again to clear' : 'How did you feel?';
+  scoreRow($('#foodRow'), 'food', tr('Food score'), s => String(s));
+  $('#foodAnchor').textContent = d.food ? `${d.food}: ${tr(FOOD_ANCHORS[d.food])}` : '';
+  $('#foodHint').textContent = d.food ? tr('Tap again to clear') : tr('How did you eat?');
+  scoreRow($('#moodRow'), 'mood', tr('Mood'), s => el('span', { class: 'mood-face' }, MOODS[s].icon, el('small', {}, String(s))));
+  $('#moodAnchor').textContent = d.mood ? `${d.mood}: ${tr(MOODS[d.mood].label)}` : '';
+  $('#moodHint').textContent = d.mood ? tr('Tap again to clear') : tr('How did you feel?');
 
   const prevW = lastWeightBefore(ymd(addDays(parseYmd(dayKey), -1)));
   const wv = $('#weightValue');
   wv.innerHTML = '';
   if (d.weight != null) {
     const diff = prevW != null ? Math.round((d.weight - prevW) * 10) / 10 : null;
-    wv.append(el('b', { class: 'wbig' }, fmtKg(d.weight)), diff ? el('span', { class: 'muted small' }, ` ${diff > 0 ? '+' : ''}${fmt1(diff)} since last`) : null);
+    wv.append(el('b', { class: 'wbig' }, fmtKg(d.weight)));
+    if (diff) wv.append(el('span', { class: 'muted small' }, ' ' + tr('{d} since last', { d: `${diff > 0 ? '+' : ''}${fmt1(diff)}` })));
   } else {
-    wv.append(el('span', { class: 'muted' }, prevW != null ? `Not weighed · last ${fmtKg(prevW)}` : 'Not weighed'));
+    wv.append(el('span', { class: 'muted' }, prevW != null ? tr('Not weighed · last {w}', { w: fmtKg(prevW) }) : tr('Not weighed')));
   }
-  $('#weightBtn').textContent = d.weight != null ? 'Change' : 'Add weight';
+  $('#weightBtn').textContent = d.weight != null ? tr('Change') : tr('Add weight');
 
   const c = $('#counters');
   c.innerHTML = '';
@@ -383,14 +384,14 @@ function renderDay() {
     const n = d[x.id] || 0;
     c.append(el('div', { class: 'counter' },
       el('span', { class: 'ci' }, x.icon),
-      el('div', { class: 'cx' }, el('b', {}, x.name), el('span', { class: 'muted small' }, x.hint)),
-      el('button', { class: 'cb', 'aria-label': `Remove one ${x.name}`, disabled: n === 0, onclick: () => { updateDay(dayKey, y => { y[x.id] = Math.max(0, (y[x.id] || 0) - 1); }); renderDay(); } }, '−'),
+      el('div', { class: 'cx' }, el('b', {}, tr(x.name)), el('span', { class: 'muted small' }, tr(x.hint))),
+      el('button', { class: 'cb', 'aria-label': `− ${tr(x.name)}`, disabled: n === 0, onclick: () => { updateDay(dayKey, y => { y[x.id] = Math.max(0, (y[x.id] || 0) - 1); }); renderDay(); } }, '−'),
       el('span', { class: `cn${n ? ' on' : ''}` }, String(n)),
-      el('button', { class: 'cb plus', 'aria-label': `Add one ${x.name}`, onclick: () => { updateDay(dayKey, y => { y[x.id] = Math.min(50, (y[x.id] || 0) + 1); }); renderDay(); } }, '+'),
+      el('button', { class: 'cb plus', 'aria-label': `+ ${tr(x.name)}`, onclick: () => { updateDay(dayKey, y => { y[x.id] = Math.min(50, (y[x.id] || 0) + 1); }); renderDay(); } }, '+'),
     ));
   }
   const total = drinksOf(d);
-  $('#drinkSummary').textContent = total ? `${total} today` : 'None';
+  $('#drinkSummary').textContent = total ? tr('{n} today', { n: total }) : tr('None');
 
   const pc = $('#partnerToday');
   pc.hidden = !Sync.enabled;
@@ -398,11 +399,11 @@ function renderDay() {
     const p = Sync.partnerDays[dayKey] || EMPTY;
     pc.innerHTML = '';
     pc.append(
-      el('div', { class: 'card-head' }, el('h2', {}, Sync.partnerName || 'Partner'), el('span', { class: 'muted small' }, 'same day')),
+      el('div', { class: 'card-head' }, el('h2', {}, Sync.partnerName || tr('Partner')), el('span', { class: 'muted small' }, tr('same day'))),
       el('div', { class: 'partner-row' },
-        el('div', { class: `mini-tile${p.food ? ' c' + p.food : ''}`, title: 'Food' }, p.food ? String(p.food) : '–'),
-        el('div', { class: `mini-tile${p.mood ? ' c' + p.mood : ''}`, title: 'Mood' }, p.mood ? MOODS[p.mood].icon : '–'),
-        el('div', {}, drinksOf(p) ? DRINKS.filter(x => p[x.id]).map(x => `${x.icon} ${p[x.id]}`).join('   ') : el('span', { class: 'muted' }, 'No drinks')),
+        el('div', { class: `mini-tile${p.food ? ' c' + p.food : ''}`, title: tr('Food') }, p.food ? String(p.food) : '–'),
+        el('div', { class: `mini-tile${p.mood ? ' c' + p.mood : ''}`, title: tr('Mood') }, p.mood ? MOODS[p.mood].icon : '–'),
+        el('div', {}, drinksOf(p) ? DRINKS.filter(x => p[x.id]).map(x => `${x.icon} ${p[x.id]}`).join('   ') : el('span', { class: 'muted' }, tr('No drinks'))),
       ),
     );
   }
@@ -414,18 +415,18 @@ function openWeightSheet() {
   const input = el('input', { type: 'number', inputmode: 'decimal', step: '0.1', min: '20', max: '400', value: start === '' ? '' : String(start), placeholder: 'kg' });
   const nudge = n => { const v = Number(input.value) || 0; input.value = (Math.round((v + n) * 10) / 10).toFixed(1); };
   openSheet(el('div', {},
-    el('h3', {}, 'Weight'),
-    el('p', { class: 'muted small' }, 'Tip: weigh at the same moment each day, e.g. in the morning before breakfast.'),
+    el('h3', {}, tr('Weight')),
+    el('p', { class: 'muted small' }, tr('Tip: weigh at the same moment each day, e.g. in the morning before breakfast.')),
     el('div', { class: 'field' }, el('div', { class: 'wrow' },
       el('button', { class: 'cb', type: 'button', onclick: () => nudge(-0.1) }, '−'), input, el('button', { class: 'cb plus', type: 'button', onclick: () => nudge(0.1) }, '+'))),
     el('div', { class: 'sheet-actions' },
-      d.weight != null ? el('button', { class: 'btn danger', onclick: () => { updateDay(dayKey, x => { x.weight = null; }); closeSheet(); renderDay(); } }, 'Clear') : null,
-      el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+      d.weight != null ? el('button', { class: 'btn danger', onclick: () => { updateDay(dayKey, x => { x.weight = null; }); closeSheet(); renderDay(); } }, tr('Clear')) : null,
+      el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')),
       el('button', { class: 'btn primary', onclick: () => {
         const v = Math.round(Number(String(input.value).replace(',', '.')) * 10) / 10;
         if (!(v >= 20 && v <= 400)) { input.focus(); return; }
         updateDay(dayKey, x => { x.weight = v; }); closeSheet(); renderDay();
-      } }, 'Save'),
+      } }, tr('Save')),
     ),
   ));
   setTimeout(() => input.focus(), 50);
@@ -439,27 +440,27 @@ function statsBlock(label, s, showLabel) {
   return el('div', { class: 'stats-person' },
     showLabel ? el('div', { class: 'sp-name' }, label) : null,
     el('div', { class: 'stats' },
-      el('div', { class: 'stat' }, el('b', {}, s.avgFood != null ? fmt1(s.avgFood) : '–'), el('span', {}, `avg food (${s.rated}/${s.days} days)`)),
-      el('div', { class: 'stat' }, el('b', {}, s.avgMood != null ? fmt1(s.avgMood) : '–'), el('span', {}, `avg mood (${s.moodDays}/${s.days} days)`)),
-      el('div', { class: 'stat' }, el('b', {}, `${s.free}/${s.logged}`), el('span', {}, 'alcohol-free (of days logged)')),
+      el('div', { class: 'stat' }, el('b', {}, s.avgFood != null ? fmt1(s.avgFood) : '–'), el('span', {}, tr('avg food ({a}/{b} days)', { a: s.rated, b: s.days }))),
+      el('div', { class: 'stat' }, el('b', {}, s.avgMood != null ? fmt1(s.avgMood) : '–'), el('span', {}, tr('avg mood ({a}/{b} days)', { a: s.moodDays, b: s.days }))),
+      el('div', { class: 'stat' }, el('b', {}, `${s.free}/${s.logged}`), el('span', {}, tr('alcohol-free (of days logged)'))),
       el('div', { class: 'stat' }, el('b', {}, s.weightLast != null ? fmtKg(s.weightLast) : '–'),
-        el('span', {}, s.weightLast != null && s.weightFirst != null && s.weightLast !== s.weightFirst ? `weight, ${s.weightLast > s.weightFirst ? '+' : ''}${fmt1(s.weightLast - s.weightFirst)} kg in this period` : 'latest weight')),
-      el('div', { class: 'stat wide' }, el('b', {}, drinkLine(s)), el('span', {}, `${s.drinks} drinks in total`)),
+        el('span', {}, s.weightLast != null && s.weightFirst != null && s.weightLast !== s.weightFirst ? tr('weight, {d} kg in this period', { d: `${s.weightLast > s.weightFirst ? '+' : ''}${fmt1(s.weightLast - s.weightFirst)}` }) : tr('latest weight'))),
+      el('div', { class: 'stat wide' }, el('b', {}, drinkLine(s)), el('span', {}, tr('{n} drinks in total', { n: s.drinks }))),
     ),
   );
 }
 function people() {
-  const me = { label: state.settings.name || 'Me', days: state.days };
-  const partner = { label: Sync.partnerName || 'Partner', days: Sync.partnerDays };
+  const me = { label: state.settings.name || tr('Me'), days: state.days };
+  const partner = { label: Sync.partnerName || tr('Partner'), days: Sync.partnerDays };
   return who === 'me' ? [me] : who === 'partner' ? [partner] : [me, partner];
 }
 function statsCard(keys) {
   const ps = people();
-  return el('div', { class: 'card' }, el('h2', {}, 'Summary'), ps.map(p => statsBlock(p.label, summarise(keys, p.days), ps.length > 1)));
+  return el('div', { class: 'card' }, el('h2', {}, tr('Summary')), ps.map(p => statsBlock(p.label, summarise(keys, p.days), ps.length > 1)));
 }
 function metricSeg() {
   const w = el('div', { class: 'seg mini' });
-  for (const [k, label] of Object.entries(METRICS)) w.append(el('button', { class: k === metric ? 'on' : '', onclick: () => { metric = k; render(); } }, label));
+  for (const [k, label] of Object.entries(METRICS)) w.append(el('button', { class: k === metric ? 'on' : '', onclick: () => { metric = k; render(); } }, tr(label)));
   return w;
 }
 function cardHead(title) { return el('div', { class: 'card-head' }, el('h2', {}, title), metricSeg()); }
@@ -468,8 +469,8 @@ function weightCard(keys) {
   const ps = people();
   const series = ps.map((p, i) => ({ label: p.label, cls: i === 0 && who !== 'partner' ? 'w-me' : 'w-partner', pts: keys.map((k, x) => [x, (p.days[k] || EMPTY).weight]).filter(([, w]) => w != null) }));
   const all = series.flatMap(s => s.pts.map(p => p[1]));
-  const card = el('div', { class: 'card' }, el('h2', {}, 'Weight'));
-  if (!all.length) { card.append(el('p', { class: 'muted small' }, 'No weight logged in this period.')); return card; }
+  const card = el('div', { class: 'card' }, el('h2', {}, tr('Weight')));
+  if (!all.length) { card.append(el('p', { class: 'muted small' }, tr('No weight logged in this period.'))); return card; }
   const W = 320, H = 140, P = 28;
   let lo = Math.min(...all), hi = Math.max(...all);
   if (hi - lo < 2) { const mid = (hi + lo) / 2; lo = mid - 1; hi = mid + 1; }
@@ -496,7 +497,7 @@ function weightCard(keys) {
 
 function legend() {
   if (who !== 'both') return null;
-  return el('p', { class: 'muted small' }, `Left half: ${state.settings.name || 'you'} · right half: ${Sync.partnerName || 'partner'}`);
+  return el('p', { class: 'muted small' }, tr('Left half: {a} · right half: {b}', { a: state.settings.name || tr('you'), b: Sync.partnerName || tr('partner') }));
 }
 
 function renderWeek(box) {
@@ -512,11 +513,11 @@ function renderWeek(box) {
     const drinkText = !n ? '' : who === 'both' ? `${n} drinks` : DRINKS.filter(x => d[x.id]).map(x => `${x.icon}${d[x.id]}`).join(' ');
     grid.append(el('div', { class: `wf${k === t ? ' today' : ''}${k > t ? ' future' : ''}`, onclick: k > t ? null : () => openDay(k) },
       el('div', { class: 'wt', style: `background:${cellBg(k, who)}` }, food || ''),
-      el('div', { class: 'wd' }, DAY_SHORT[i]),
+      el('div', { class: 'wd' }, DAY_SHORT_[lang()][i]),
       el('div', { class: 'wdr' }, drinkText),
     ));
   });
-  box.append(el('div', { class: 'card' }, cardHead('Your week'), grid, legend()), weightCard(keys), statsCard(keys));
+  box.append(el('div', { class: 'card' }, cardHead(tr('Your week')), grid, legend()), weightCard(keys), statsCard(keys));
 }
 
 function renderMonth(box) {
@@ -525,7 +526,7 @@ function renderMonth(box) {
   const first = new Date(y, m, 1);
   const lead = (first.getDay() + 6) % 7;
   const t = todayKey();
-  const grid = el('div', { class: 'cal' }, DAY_SHORT.map(d => el('div', { class: 'cal-h' }, d.slice(0, 2))));
+  const grid = el('div', { class: 'cal' }, DAY_SHORT_[lang()].map(d => el('div', { class: 'cal-h' }, d.slice(0, 2))));
   for (let i = 0; i < lead; i++) grid.append(el('div'));
   const keys = [];
   for (let day = 1; day <= n; day++) {
@@ -539,8 +540,8 @@ function renderMonth(box) {
     }, el('span', { class: 'cal-n' }, String(day)), drinks ? el('span', { class: 'cal-x' }, String(drinks)) : null));
   }
   box.append(el('div', { class: 'card' },
-    cardHead('Calendar'), grid,
-    el('p', { class: 'muted small' }, `Colour = ${METRICS[metric].toLowerCase()} score. Small number = drinks that day.`), legend(),
+    cardHead(tr('Calendar')), grid,
+    el('p', { class: 'muted small' }, tr('Colour = {m} score. Small number = drinks that day.', { m: tr(METRICS[metric]).toLowerCase() })), legend(),
   ), weightCard(keys), statsCard(keys));
 }
 
@@ -553,7 +554,7 @@ function renderYear(box) {
   for (let m = 0; m < 12; m++) {
     const keys = [];
     const row = el('div', { class: 'yr', onclick: () => { if (ymd(new Date(y, m, 1)) <= t) { anchor = new Date(y, m, 1); period = 'month'; render(); } } },
-      el('span', { class: 'yl' }, MONTH_SHORT[m]));
+      el('span', { class: 'yl' }, MONTH_SHORT_[lang()][m]));
     for (let day = 1; day <= 31; day++) {
       if (day > daysInMonth(y, m)) { row.append(el('span', { class: 'yc none' })); continue; }
       const k = ymd(new Date(y, m, day));
@@ -566,11 +567,11 @@ function renderYear(box) {
   // Per-month table
   const ps = people();
   const table = el('table', { class: 'mt' },
-    el('thead', {}, el('tr', {}, el('th', {}, ''), ps.length > 1 ? el('th', {}, '') : null, el('th', {}, 'Food'), el('th', {}, 'Mood'), el('th', {}, 'Drinks'), el('th', {}, 'Dry'))),
+    el('thead', {}, el('tr', {}, el('th', {}, ''), ps.length > 1 ? el('th', {}, '') : null, el('th', {}, tr('Food')), el('th', {}, tr('Mood')), el('th', {}, tr('Drinks')), el('th', {}, tr('Dry')))),
     el('tbody', {}, rows.filter(r => r.keys[0] <= t).flatMap(r => ps.map((p, i) => {
       const s = summarise(r.keys, p.days);
       return el('tr', { class: i === ps.length - 1 ? 'last' : '', onclick: () => { anchor = new Date(y, r.m, 1); period = 'month'; render(); } },
-        el('td', {}, i === 0 ? MONTH_SHORT[r.m] : ''),
+        el('td', {}, i === 0 ? MONTH_SHORT_[lang()][r.m] : ''),
         ps.length > 1 ? el('td', { class: 'muted' }, p.label) : null,
         el('td', {}, s.avgFood != null ? el('span', { class: `pill c${Math.round(s.avgFood)}` }, fmt1(s.avgFood)) : '–'),
         el('td', {}, s.avgMood != null ? el('span', { class: `pill c${Math.round(s.avgMood)}` }, fmt1(s.avgMood)) : '–'),
@@ -580,8 +581,8 @@ function renderYear(box) {
     }))),
   );
   box.append(
-    el('div', { class: 'card' }, cardHead('Every day'), grid, el('p', { class: 'muted small' }, `One row per month, one square per day, coloured by ${METRICS[metric].toLowerCase()} score. Tap a month to open it.`), legend()),
-    el('div', { class: 'card' }, el('h2', {}, 'Per month'), table),
+    el('div', { class: 'card' }, cardHead(tr('Every day')), grid, el('p', { class: 'muted small' }, tr('One row per month, one square per day, coloured by {m} score. Tap a month to open it.', { m: tr(METRICS[metric]).toLowerCase() })), legend()),
+    el('div', { class: 'card' }, el('h2', {}, tr('Per month')), table),
     weightCard(allKeys.filter(k => k <= t)),
     statsCard(allKeys),
   );
@@ -593,7 +594,7 @@ function renderOverview() {
   if (!Sync.enabled) who = 'me';
   $('#whoSeg').querySelectorAll('button').forEach(b => {
     b.classList.toggle('on', b.dataset.v === who);
-    if (b.dataset.v === 'partner') b.textContent = Sync.partnerName || 'Partner';
+    if (b.dataset.v === 'partner') b.textContent = Sync.partnerName || tr('Partner');
   });
   const box = $('#overview');
   box.innerHTML = '';
@@ -610,65 +611,66 @@ function renderSettings() {
   renderShareCard();
 
   const n = Object.keys(state.days).length;
+  const nd = n === 1 ? tr('1 day') : tr('{n} days', { n });
   $('#storageInfo').textContent = Sync.on
-    ? `${n} day${n === 1 ? '' : 's'} logged, stored on this phone and online. Keep your key (Share card → More options) to get them back on a new phone.`
-    : `${n} day${n === 1 ? '' : 's'} logged, stored only on this phone. Download a backup now and then: clearing Chrome's site data or uninstalling the app erases it.`;
+    ? tr('{nd} logged, stored on this phone and online. Keep your key (Share card → More options) to get them back on a new phone.', { nd })
+    : tr('{nd} logged, stored only on this phone. Download a backup now and then: clearing Chrome\'s site data or uninstalling the app erases it.', { nd });
   const g = $('#foodGuide'); g.innerHTML = '';
-  for (let s = 5; s >= 1; s--) g.append(el('li', {}, el('span', { class: `pill c${s}` }, String(s)), ' ', FOOD_ANCHORS[s]));
-  $('#versionInfo').textContent = `Daily Tracker v${APP_VERSION}`;
+  for (let s = 5; s >= 1; s--) g.append(el('li', {}, el('span', { class: `pill c${s}` }, String(s)), ' ', tr(FOOD_ANCHORS[s])));
+  $('#versionInfo').textContent = `${tr('Daily Tracker')} v${APP_VERSION}`;
 }
 
 async function busyDo(btn, fn) {
   const label = btn.textContent;
-  btn.disabled = true; btn.textContent = 'One moment…';
-  try { await fn(); } catch (e) { toast(/fetch|network|load failed/i.test(e.message) ? 'No internet connection. Try again later.' : `Didn't work: ${e.message}`); }
+  btn.disabled = true; btn.textContent = tr('One moment…');
+  try { await fn(); } catch (e) { toast(/fetch|network|load failed/i.test(e.message) ? tr('No internet connection. Try again later.') : tr("Didn't work: {e}", { e: e.message })); }
   finally { btn.disabled = false; btn.textContent = label; }
 }
 function renderShareCard() {
   const sc = $('#shareCard');
   sc.innerHTML = '';
-  sc.append(el('h2', {}, 'Share with your partner'));
+  sc.append(el('h2', {}, tr('Share with your partner')));
   if (!Sync.on) {
     sc.append(
-      el('p', { class: 'muted small' }, 'Turn on sharing to see each other\'s days in the overview. Your days are then also stored online, so they are safe if you lose your phone. No email or password needed.'),
-      el('button', { class: 'btn primary wide', onclick: openStartSheet }, 'Turn on sharing'),
-      el('button', { class: 'btn wide', onclick: openUseKeySheet }, 'I already use the app on another phone'),
+      el('p', { class: 'muted small' }, tr('Turn on sharing to see each other\'s days in the overview. Your days are then also stored online, so they are safe if you lose your phone. No email or password needed.')),
+      el('button', { class: 'btn primary wide', onclick: openStartSheet }, tr('Turn on sharing')),
+      el('button', { class: 'btn wide', onclick: openUseKeySheet }, tr('I already use the app on another phone')),
     );
     return;
   }
-  sc.append(el('p', { class: 'muted small' }, `You are “${state.settings.name || 'me'}”. ${Sync.statusText()}`));
+  sc.append(el('p', { class: 'muted small' }, tr('You are “{n}”.', { n: state.settings.name || tr('me') }) + ' ' + Sync.statusText()));
   if (state.sync.partner) {
-    sc.append(el('p', {}, `Connected with `, el('b', {}, Sync.partnerName), '.'));
+    sc.append(el('p', {}, tr('Connected with') + ' ', el('b', {}, Sync.partnerName), '.'));
   } else {
-    const codeBtn = el('button', { class: 'btn primary wide' }, 'Create a pairing code');
+    const codeBtn = el('button', { class: 'btn primary wide' }, tr('Create a pairing code'));
     codeBtn.onclick = () => busyDo(codeBtn, async () => {
       const code = await rpc('tracker_create_invite', { p_secret: state.sync.secret });
       showCodeSheet(code);
     });
     sc.append(
-      el('p', { class: 'muted small' }, 'Not connected yet. One of you creates a code, the other types it in.'),
+      el('p', { class: 'muted small' }, tr('Not connected yet. One of you creates a code, the other types it in.')),
       codeBtn,
-      el('button', { class: 'btn wide', onclick: openEnterCodeSheet }, 'Enter my partner\'s code'),
+      el('button', { class: 'btn wide', onclick: openEnterCodeSheet }, tr('Enter my partner\'s code')),
     );
   }
   const weightToggle = el('input', { type: 'checkbox', id: 'shareWeight' });
   weightToggle.checked = !!state.sync.shareWeight;
   weightToggle.onchange = async () => {
     try { await rpc('tracker_update_profile', { p_secret: state.sync.secret, p_name: null, p_share_weight: weightToggle.checked }); state.sync.shareWeight = weightToggle.checked; save(); }
-    catch (e) { weightToggle.checked = !weightToggle.checked; toast('No internet connection. Try again later.'); }
+    catch (e) { weightToggle.checked = !weightToggle.checked; toast(tr('No internet connection. Try again later.')); }
   };
-  sc.append(el('label', { class: 'toggle', for: 'shareWeight' }, weightToggle, ' Let my partner see my weight'));
-  const syncBtn = el('button', { class: 'btn wide' }, 'Sync now');
+  sc.append(el('label', { class: 'toggle', for: 'shareWeight' }, weightToggle, ' ' + tr('Let my partner see my weight')));
+  const syncBtn = el('button', { class: 'btn wide' }, tr('Sync now'));
   syncBtn.onclick = () => busyDo(syncBtn, () => Sync.run());
   sc.append(syncBtn, el('details', { class: 'more' },
-    el('summary', {}, 'More options'),
-    el('button', { class: 'btn wide', onclick: showKeySheet }, 'Show my key (to move to a new phone)'),
-    state.sync.partner ? el('button', { class: 'btn wide', onclick: confirmUnpair }, `Disconnect from ${Sync.partnerName}`) : null,
-    el('button', { class: 'btn danger wide', onclick: confirmErase }, 'Turn off sharing and erase my online data'),
+    el('summary', {}, tr('More options')),
+    el('button', { class: 'btn wide', onclick: showKeySheet }, tr('Show my key (to move to a new phone)')),
+    state.sync.partner ? el('button', { class: 'btn wide', onclick: confirmUnpair }, tr('Disconnect from {n}', { n: Sync.partnerName })) : null,
+    el('button', { class: 'btn danger wide', onclick: confirmErase }, tr('Turn off sharing and erase my online data')),
   ));
 }
 /* ---------- Reminders (Web Push from the server) ---------- */
-const DOW = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DOW_ = { en: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], nl: ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag'] };
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 function b64ToBytes(b64) {
   const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
@@ -676,7 +678,7 @@ function b64ToBytes(b64) {
 }
 async function ensurePush() {
   const perm = await Notification.requestPermission();
-  if (perm !== 'granted') throw new Error('Notifications are blocked. Allow them in Android Settings → Apps → Daily Tracker → Notifications.');
+  if (perm !== 'granted') throw new Error(tr('Notifications are blocked. Allow them in Android Settings → Apps → Daily Tracker → Notifications.'));
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
@@ -686,21 +688,21 @@ async function saveReminders() {
   const r = state.settings.reminders;
   if (r.daily_on || r.weight_on) await ensurePush();
   await rpc('tracker_set_reminders', { p_secret: state.sync.secret, p_settings: {
-    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Amsterdam', ...r } });
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Amsterdam', lang: lang(), ...r } });
   save();
 }
 function renderReminderCard() {
   const card = $('#reminderCard');
   card.innerHTML = '';
-  card.append(el('h2', {}, 'Reminders'));
+  card.append(el('h2', {}, tr('Reminders')));
   if (!pushSupported()) {
-    card.append(el('p', { class: 'muted small' }, 'Add the app to your home screen first (Chrome ⋮ → Add to home screen), then open it from there to turn on reminders.'));
+    card.append(el('p', { class: 'muted small' }, tr('Add the app to your home screen first (Chrome ⋮ → Add to home screen), then open it from there to turn on reminders.')));
     return;
   }
   if (!Sync.on) {
     card.append(
-      el('p', { class: 'muted small' }, 'Reminders are sent by the online service, so they arrive even when the app is closed. Turn on online sync to use them (sharing with a partner stays optional).'),
-      el('button', { class: 'btn primary wide', onclick: openStartSheet }, 'Turn on online sync'),
+      el('p', { class: 'muted small' }, tr('Reminders are sent by the online service, so they arrive even when the app is closed. Turn on online sync to use them (sharing with a partner stays optional).')),
+      el('button', { class: 'btn primary wide', onclick: openStartSheet }, tr('Turn on online sync')),
     );
     return;
   }
@@ -708,7 +710,7 @@ function renderReminderCard() {
   const apply = async (fn, rollback) => {
     fn(); renderReminderCard();
     try { await saveReminders(); }
-    catch (e) { rollback(); save(); renderReminderCard(); toast(/fetch|network|load failed/i.test(e.message) ? 'No internet connection. Try again later.' : e.message); }
+    catch (e) { rollback(); save(); renderReminderCard(); toast(/fetch|network|load failed/i.test(e.message) ? tr('No internet connection. Try again later.') : e.message); }
   };
   const timeInput = (key) => {
     const i = el('input', { type: 'time', value: r[key], class: 'time' });
@@ -721,106 +723,106 @@ function renderReminderCard() {
     i.onchange = () => { const v = i.checked; apply(() => { r[key] = v; }, () => { r[key] = !v; }); };
     return el('label', { class: 'toggle', for: `rem_${key}` }, i, ' ', label);
   };
-  const dow = el('select', { class: 'time' }, DOW.map((d, i) => { const o = el('option', { value: String(i + 1) }, d); if (r.weight_dow === i + 1) o.selected = true; return o; }));
+  const dow = el('select', { class: 'time' }, DOW_[lang()].map((d, i) => { const o = el('option', { value: String(i + 1) }, d); if (r.weight_dow === i + 1) o.selected = true; return o; }));
   dow.onchange = () => { const old = r.weight_dow; apply(() => { r.weight_dow = Number(dow.value); }, () => { r.weight_dow = old; }); };
   card.append(
-    toggle('daily_on', 'Daily: fill in food, mood and drinks'),
-    r.daily_on ? el('div', { class: 'rem-row' }, el('span', { class: 'muted small' }, 'Every day at'), timeInput('daily_time')) : null,
-    toggle('weight_on', 'Weekly: weigh yourself'),
-    r.weight_on ? el('div', { class: 'rem-row' }, el('span', { class: 'muted small' }, 'Every'), dow, el('span', { class: 'muted small' }, 'at'), timeInput('weight_time')) : null,
-    el('p', { class: 'muted small' }, 'No reminder if you already filled in that day.'),
+    toggle('daily_on', tr('Daily: fill in food, mood and drinks')),
+    r.daily_on ? el('div', { class: 'rem-row' }, el('span', { class: 'muted small' }, tr('Every day at')), timeInput('daily_time')) : null,
+    toggle('weight_on', tr('Weekly: weigh yourself')),
+    r.weight_on ? el('div', { class: 'rem-row' }, el('span', { class: 'muted small' }, tr('Every')), dow, el('span', { class: 'muted small' }, tr('at')), timeInput('weight_time')) : null,
+    el('p', { class: 'muted small' }, tr('No reminder if you already filled in that day.')),
     (r.daily_on || r.weight_on) ? el('button', { class: 'btn wide', onclick: async () => {
-      try { const reg = await navigator.serviceWorker.ready; await reg.showNotification('Daily Tracker', { body: 'Reminders work on this phone.', icon: 'icons/icon-192.png' }); }
-      catch (e) { toast('Notifications are blocked on this phone.'); }
-    } }, 'Send a test notification') : null,
+      try { const reg = await navigator.serviceWorker.ready; await reg.showNotification(tr('Daily Tracker'), { body: tr('Reminders work on this phone.'), icon: 'icons/icon-192.png' }); }
+      catch (e) { toast(tr('Notifications are blocked on this phone.')); }
+    } }, tr('Send a test notification')) : null,
   );
 }
 
 function openStartSheet() {
-  const name = el('input', { type: 'text', maxlength: '40', placeholder: 'e.g. Guido', value: state.settings.name || '' });
-  const go = el('button', { class: 'btn primary' }, 'Turn on');
+  const name = el('input', { type: 'text', maxlength: '40', placeholder: tr('e.g. Guido'), value: state.settings.name || '' });
+  const go = el('button', { class: 'btn primary' }, tr('Turn on'));
   go.onclick = () => {
     if (!name.value.trim()) { name.focus(); return; }
-    busyDo(go, async () => { await Sync.start(name.value.trim()); closeSheet(); render(); toast('Online sync is on.'); });
+    busyDo(go, async () => { await Sync.start(name.value.trim()); closeSheet(); render(); toast(tr('Online sync is on.')); });
   };
   openSheet(el('div', {},
-    el('h3', {}, 'Turn on online sync'),
-    el('p', { class: 'muted small' }, 'Your days are then also stored online: needed for reminders and for sharing with a partner, and safe if you lose your phone. No email or password.'),
-    el('div', { class: 'field' }, el('label', {}, 'Your first name (a partner would see this)'), name),
-    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+    el('h3', {}, tr('Turn on online sync')),
+    el('p', { class: 'muted small' }, tr('Your days are then also stored online: needed for reminders and for sharing with a partner, and safe if you lose your phone. No email or password.')),
+    el('div', { class: 'field' }, el('label', {}, tr('Your first name (a partner would see this)')), name),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')), go),
   ));
 }
 function showCodeSheet(code) {
   const pretty = `${code.slice(0, 4)} ${code.slice(4)}`;
-  const text = `Join me in Daily Tracker: open ${location.origin}${location.pathname} , go to Settings → Turn on sharing → Enter my partner's code: ${pretty}`;
+  const text = tr('Join me in Daily Tracker: open {url} , go to Settings → Turn on sharing → Enter my partner\'s code: {code}', { url: location.origin + location.pathname, code: pretty });
   openSheet(el('div', {},
-    el('h3', {}, 'Your pairing code'),
+    el('h3', {}, tr('Your pairing code')),
     el('div', { class: 'code' }, pretty),
-    el('p', { class: 'muted small' }, 'Your partner opens the app, taps Settings → Turn on sharing, then “Enter my partner\'s code”. The code works for 24 hours.'),
+    el('p', { class: 'muted small' }, tr('Your partner opens the app, taps Settings → Turn on sharing, then “Enter my partner\'s code”. The code works for 24 hours.')),
     el('div', { class: 'sheet-actions' },
-      navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ text }).catch(() => {}) }, 'Send via…') : null,
-      el('button', { class: 'btn primary', onclick: () => { closeSheet(); Sync.run(); } }, 'Done'),
+      navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ text }).catch(() => {}) }, tr('Send via…')) : null,
+      el('button', { class: 'btn primary', onclick: () => { closeSheet(); Sync.run(); } }, tr('Done')),
     ),
   ));
 }
 function openEnterCodeSheet() {
   const input = el('input', { type: 'text', maxlength: '12', placeholder: 'ABCD 2345', autocapitalize: 'characters', autocomplete: 'off', class: 'code-input' });
-  const go = el('button', { class: 'btn primary' }, 'Connect');
+  const go = el('button', { class: 'btn primary' }, tr('Connect'));
   go.onclick = () => {
     if (input.value.replace(/\s/g, '').length < 8) { input.focus(); return; }
     busyDo(go, async () => {
       await rpc('tracker_accept_invite', { p_secret: state.sync.secret, p_code: input.value });
-      await Sync.run(); closeSheet(); render(); toast(`Connected with ${Sync.partnerName}.`);
+      await Sync.run(); closeSheet(); render(); toast(tr('Connected with') + ` ${Sync.partnerName}.`);
     });
   };
   openSheet(el('div', {},
-    el('h3', {}, 'Enter your partner\'s code'),
+    el('h3', {}, tr('Enter your partner\'s code')),
     el('div', { class: 'field' }, input),
-    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')), go),
   ));
 }
 function showKeySheet() {
   const key = state.sync.secret;
   openSheet(el('div', {},
-    el('h3', {}, 'Your key'),
-    el('p', { class: 'muted small' }, 'On a new phone, choose “I already use the app on another phone” and paste this key. Keep it private: anyone with it can see and change your days.'),
+    el('h3', {}, tr('Your key')),
+    el('p', { class: 'muted small' }, tr('On a new phone, choose “I already use the app on another phone” and paste this key. Keep it private: anyone with it can see and change your days.')),
     el('div', { class: 'keybox' }, key),
     el('div', { class: 'sheet-actions' },
-      el('button', { class: 'btn', onclick: () => { navigator.clipboard && navigator.clipboard.writeText(key).then(() => toast('Key copied.')).catch(() => {}); } }, 'Copy'),
-      el('button', { class: 'btn primary', onclick: closeSheet }, 'Done'),
+      el('button', { class: 'btn', onclick: () => { navigator.clipboard && navigator.clipboard.writeText(key).then(() => toast(tr('Key copied.'))).catch(() => {}); } }, tr('Copy')),
+      el('button', { class: 'btn primary', onclick: closeSheet }, tr('Done')),
     ),
   ));
 }
 function openUseKeySheet() {
-  const input = el('input', { type: 'text', placeholder: 'Paste your key', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
-  const go = el('button', { class: 'btn primary' }, 'Continue');
+  const input = el('input', { type: 'text', placeholder: tr('Paste your key'), autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
+  const go = el('button', { class: 'btn primary' }, tr('Continue'));
   go.onclick = () => {
     if (input.value.trim().length < 32) { input.focus(); return; }
-    busyDo(go, async () => { await Sync.useKey(input.value); closeSheet(); render(); toast('Your days are back on this phone.'); });
+    busyDo(go, async () => { await Sync.useKey(input.value); closeSheet(); render(); toast(tr('Your days are back on this phone.')); });
   };
   openSheet(el('div', {},
-    el('h3', {}, 'Use your key'),
-    el('p', { class: 'muted small' }, 'On your old phone: Settings → More options → Show my key. Your days come back on this phone.'),
+    el('h3', {}, tr('Use your key')),
+    el('p', { class: 'muted small' }, tr('On your old phone: Settings → More options → Show my key. Your days come back on this phone.')),
     el('div', { class: 'field' }, input),
-    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')), go),
   ));
 }
 function confirmUnpair() {
-  const go = el('button', { class: 'btn danger' }, 'Disconnect');
+  const go = el('button', { class: 'btn danger' }, tr('Disconnect'));
   go.onclick = () => busyDo(go, async () => { await rpc('tracker_unpair', { p_secret: state.sync.secret }); await Sync.run(); closeSheet(); render(); });
   openSheet(el('div', {},
-    el('h3', {}, `Disconnect from ${Sync.partnerName}?`),
-    el('p', {}, 'You stop seeing each other\'s days. Your own days stay where they are. You can connect again with a new code.'),
-    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+    el('h3', {}, tr('Disconnect from {n}', { n: Sync.partnerName }) + '?'),
+    el('p', {}, tr('You stop seeing each other\'s days. Your own days stay where they are. You can connect again with a new code.')),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')), go),
   ));
 }
 function confirmErase() {
-  const go = el('button', { class: 'btn danger' }, 'Erase online data');
-  go.onclick = () => busyDo(go, async () => { await Sync.erase(); closeSheet(); render(); toast('Sharing is off. Your days are still on this phone.'); });
+  const go = el('button', { class: 'btn danger' }, tr('Erase online data'));
+  go.onclick = () => busyDo(go, async () => { await Sync.erase(); closeSheet(); render(); toast(tr('Sharing is off. Your days are still on this phone.')); });
   openSheet(el('div', {},
-    el('h3', {}, 'Turn off sharing?'),
-    el('p', {}, 'This erases your days from the online database and disconnects your partner. Your days stay on this phone.'),
-    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
+    el('h3', {}, tr('Turn off sharing?')),
+    el('p', {}, tr('This erases your days from the online database and disconnects your partner. Your days stay on this phone.')),
+    el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')), go),
   ));
 }
 
@@ -845,42 +847,42 @@ function importJson(file) {
   const reader = new FileReader();
   reader.onload = () => {
     let data;
-    try { data = JSON.parse(reader.result); } catch (e) { toast('That file is not a valid backup.'); return; }
-    if (!data || typeof data !== 'object' || !data.days) { toast('That file is not a Daily Tracker backup.'); return; }
+    try { data = JSON.parse(reader.result); } catch (e) { toast(tr('That file is not a valid backup.')); return; }
+    if (!data || typeof data !== 'object' || !data.days) { toast(tr('That file is not a Daily Tracker backup.')); return; }
     const n = Object.keys(data.days).length;
     openSheet(el('div', {},
-      el('h3', {}, 'Restore backup?'),
-      el('p', {}, `This replaces everything on this phone with the backup (${n} days). This can't be undone.`),
+      el('h3', {}, tr('Restore backup?')),
+      el('p', {}, tr('This replaces everything on this phone with the backup ({n} days). This can\'t be undone.', { n })),
       el('div', { class: 'sheet-actions' },
-        el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+        el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')),
         el('button', { class: 'btn primary', onclick: () => {
           delete data.app; delete data.exportedAt; delete data.sync;
           const keepSync = state.sync;
           state = migrate(data); state.sync = keepSync;
           if (Sync.on) for (const k of Object.keys(state.days)) state.sync.dirty[k] = new Date().toISOString();
-          save(); closeSheet(); render(); toast('Backup restored.'); Sync.run();
-        } }, 'Restore'),
+          save(); closeSheet(); render(); toast(tr('Backup restored.')); Sync.run();
+        } }, tr('Restore')),
       ),
     ));
   };
   reader.readAsText(file);
 }
 function confirmDeleteAll() {
-  const input = el('input', { type: 'text', placeholder: 'Type DELETE', autocomplete: 'off', autocapitalize: 'characters' });
+  const input = el('input', { type: 'text', placeholder: tr('Type DELETE'), autocomplete: 'off', autocapitalize: 'characters' });
   openSheet(el('div', {},
-    el('h3', {}, 'Delete all data?'),
-    el('p', {}, Sync.on ? 'This erases every day you logged, from this phone and from the online database, and turns sharing off. Download a backup first if you might want it back.' : 'This erases every day you logged from this phone. Download a backup first if you might want it back.'),
+    el('h3', {}, tr('Delete all data?')),
+    el('p', {}, Sync.on ? tr('This erases every day you logged, from this phone and from the online database, and turns sharing off. Download a backup first if you might want it back.') : tr('This erases every day you logged from this phone. Download a backup first if you might want it back.')),
     el('div', { class: 'field' }, input),
     el('div', { class: 'sheet-actions' },
-      el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+      el('button', { class: 'btn', onclick: closeSheet }, tr('Cancel')),
       el('button', { class: 'btn danger', onclick: async () => {
-        if (input.value.trim().toUpperCase() !== 'DELETE') { input.focus(); return; }
-        if (Sync.on) { try { await Sync.erase(); } catch (e) { toast('No internet: online data not erased yet. Try again when online.'); return; } }
+        if (!['DELETE', 'WISSEN'].includes(input.value.trim().toUpperCase())) { input.focus(); return; }
+        if (Sync.on) { try { await Sync.erase(); } catch (e) { toast(tr('No internet: online data not erased yet. Try again when online.')); return; } }
         state = freshState();
         await idbPut('state', state);
         try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
-        closeSheet(); dayKey = todayKey(); render(); toast('All data deleted.');
-      } }, 'Delete everything'),
+        closeSheet(); dayKey = todayKey(); render(); toast(tr('All data deleted.'));
+      } }, tr('Delete everything')),
     ),
   ));
 }
@@ -906,6 +908,8 @@ function setView(v) {
   window.scrollTo(0, 0);
 }
 function render() {
+  applyStatic();
+  $('#langSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === lang()));
   renderHeader();
   if (view === 'day') renderDay();
   else if (view === 'overview') renderOverview();
@@ -932,6 +936,10 @@ function bind() {
   $('#backBtn').onclick = () => { if (view === 'day') dayKey = todayKey(); else anchor = new Date(); render(); };
   $('#periodSeg').querySelectorAll('button').forEach(b => b.onclick = () => { period = b.dataset.v; render(); });
   $('#whoSeg').querySelectorAll('button').forEach(b => b.onclick = () => { who = b.dataset.v; render(); });
+  $('#langSeg').querySelectorAll('button').forEach(b => b.onclick = () => {
+    state.settings.lang = b.dataset.v; save(); render();
+    if (Sync.on) rpc('tracker_set_reminders', { p_secret: state.sync.secret, p_settings: { lang: b.dataset.v } }).catch(() => {});
+  });
   $('#exportJson').onclick = exportJson;
   $('#exportCsv').onclick = exportCsv;
   $('#importFile').onchange = (e) => { const f = e.target.files[0]; if (f) importJson(f); e.target.value = ''; };

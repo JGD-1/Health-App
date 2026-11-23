@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#14181f">
   <meta name="description" content="Daily tracker: food, mood, drinks and weight, shared with your partner.">
-  <title>Daily Tracker</title>
+  <title>Dagtracker</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -13,36 +13,36 @@
 </head>
 <body>
   <header class="topbar">
-    <button class="nav-btn" id="prev" aria-label="Previous">‹</button>
+    <button class="nav-btn" id="prev" aria-label="Vorige">‹</button>
     <div class="date-block">
       <div class="date-main" id="title">Today</div>
       <button class="date-sub" id="backBtn" hidden>Back to today</button>
     </div>
-    <button class="nav-btn" id="next" aria-label="Next">›</button>
+    <button class="nav-btn" id="next" aria-label="Volgende">›</button>
   </header>
 
   <main>
     <!-- DAY -->
     <section class="view" id="view-day">
       <div class="card">
-        <div class="card-head"><h2>Food</h2><span class="muted" id="foodHint"></span></div>
+        <div class="card-head"><h2 data-t>Food</h2><span class="muted" id="foodHint"></span></div>
         <div class="food-row" id="foodRow"></div>
         <p class="anchor" id="foodAnchor"></p>
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>Mood</h2><span class="muted" id="moodHint"></span></div>
+        <div class="card-head"><h2 data-t>Mood</h2><span class="muted" id="moodHint"></span></div>
         <div class="food-row" id="moodRow"></div>
         <p class="anchor" id="moodAnchor"></p>
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>Drinks</h2><span class="muted" id="drinkSummary"></span></div>
+        <div class="card-head"><h2 data-t>Drinks</h2><span class="muted" id="drinkSummary"></span></div>
         <div class="counters" id="counters"></div>
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>Weight</h2></div>
+        <div class="card-head"><h2 data-t>Weight</h2></div>
         <div class="weight-line"><div id="weightValue"></div><button class="btn" id="weightBtn">Add weight</button></div>
       </div>
 
@@ -52,10 +52,10 @@
     <!-- OVERVIEW -->
     <section class="view" id="view-overview" hidden>
       <div class="seg" id="periodSeg">
-        <button data-v="week">Week</button><button data-v="month">Month</button><button data-v="year">Year</button>
+        <button data-v="week" data-t>Week</button><button data-v="month" data-t>Month</button><button data-v="year" data-t>Year</button>
       </div>
       <div class="seg who" id="whoSeg" hidden>
-        <button data-v="me">Me</button><button data-v="both">Both</button><button data-v="partner">Partner</button>
+        <button data-v="me" data-t>Me</button><button data-v="both" data-t>Both</button><button data-v="partner" data-t>Partner</button>
       </div>
       <div id="overview"></div>
     </section>
@@ -67,16 +67,21 @@
       <div class="card" id="shareCard"></div>
 
       <div class="card">
-        <h2>Your data</h2>
-        <p class="muted small" id="storageInfo"></p>
-        <button class="btn wide" id="exportJson">Download backup (JSON)</button>
-        <button class="btn wide" id="exportCsv">Download spreadsheet (CSV)</button>
-        <label class="btn wide file-btn">Restore from backup<input type="file" id="importFile" accept="application/json,.json" hidden></label>
-        <button class="btn danger wide" id="deleteAll">Delete all data</button>
+        <h2>Taal / Language</h2>
+        <div class="seg" id="langSeg"><button data-v="nl">Nederlands</button><button data-v="en">English</button></div>
       </div>
 
       <div class="card">
-        <h2>Food score guide</h2>
+        <h2 data-t>Your data</h2>
+        <p class="muted small" id="storageInfo"></p>
+        <button class="btn wide" id="exportJson" data-t>Download backup (JSON)</button>
+        <button class="btn wide" id="exportCsv" data-t>Download spreadsheet (CSV)</button>
+        <label class="btn wide file-btn"><span data-t>Restore from backup</span><input type="file" id="importFile" accept="application/json,.json" hidden></label>
+        <button class="btn danger wide" id="deleteAll" data-t>Delete all data</button>
+      </div>
+
+      <div class="card">
+        <h2 data-t>Food score guide</h2>
         <ol class="guide" id="foodGuide"></ol>
       </div>
       <p class="muted small center" id="versionInfo"></p>
@@ -84,9 +89,9 @@
   </main>
 
   <nav class="tabbar">
-    <button data-view="day" class="active"><span class="ti">●</span>Today</button>
-    <button data-view="overview"><span class="ti">▦</span>Overview</button>
-    <button data-view="settings"><span class="ti">⚙</span>Settings</button>
+    <button data-view="day" class="active"><span class="ti">●</span><span data-t>Today</span></button>
+    <button data-view="overview"><span class="ti">▦</span><span data-t>Overview</span></button>
+    <button data-view="settings"><span class="ti">⚙</span><span data-t>Settings</span></button>
   </nav>
 
   <div class="sheet-backdrop" id="sheetBackdrop" hidden>
@@ -94,6 +99,7 @@
   </div>
   <div class="toast" id="toast" hidden></div>
 
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

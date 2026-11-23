@@ -1,7 +1,7 @@
 {
-  "name": "Daily Tracker",
-  "short_name": "Tracker",
-  "description": "Food score and drinks per day, shared with your partner.",
+  "name": "Dagtracker",
+  "short_name": "Dagtracker",
+  "description": "Eten, stemming, drankjes en gewicht per dag, samen met je partner.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
