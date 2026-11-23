@@ -2,7 +2,8 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
+const VAPID_PUBLIC = 'BGDrlOvXvSGbsm_TN3JPTtLm4LiTMAoMRHi9E4iH0XVlDueHdl6VzO3bSB5c0_e1-2YoR3lvN3E2YDiEtw1mMgk';
 const SUPABASE_URL = 'https://fvwdcyucxiiycdefqxtf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XwWKCUSP5-DFqJD-Q9ZUpw_KeYwGibY'; // public key; data is protected by each phone's secret key
 const SCHEMA = 2;
@@ -107,6 +108,7 @@ function migrate(s) {
   s.days = s.days || {};
   for (const d of Object.values(s.days)) { if (d.mood === undefined) d.mood = null; if (d.weight === undefined) d.weight = null; }
   s.settings = Object.assign({ name: '' }, s.settings || {});
+  s.settings.reminders = Object.assign({ daily_on: false, daily_time: '21:00', weight_on: false, weight_dow: 1, weight_time: '08:00' }, s.settings.reminders || {});
   s.sync = Object.assign(freshSync(), s.sync || {});
   return s;
 }
@@ -171,6 +173,8 @@ const Sync = {
       const me = await rpc('tracker_me', { p_secret: secret });
       if (me.name) state.settings.name = me.name;
       state.sync.shareWeight = !!me.share_weight;
+      const rem = await rpc('tracker_get_reminders', { p_secret: secret });
+      if (rem) Object.assign(state.settings.reminders, { daily_on: rem.daily_on, daily_time: rem.daily_time, weight_on: rem.weight_on, weight_dow: rem.weight_dow, weight_time: rem.weight_time });
       // 3. download own changes (other phone / reinstall) and the partner's days
       const res = await rpc('tracker_pull', { p_secret: secret, p_since: state.sync.lastPull });
       for (const r of res.mine) {
@@ -602,6 +606,7 @@ function openDay(k) { if (k > todayKey()) return; dayKey = k; setView('day'); }
 
 /* ---------- Settings ---------- */
 function renderSettings() {
+  renderReminderCard();
   renderShareCard();
 
   const n = Object.keys(state.days).length;
@@ -662,16 +667,86 @@ function renderShareCard() {
     el('button', { class: 'btn danger wide', onclick: confirmErase }, 'Turn off sharing and erase my online data'),
   ));
 }
+/* ---------- Reminders (Web Push from the server) ---------- */
+const DOW = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function b64ToBytes(b64) {
+  const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(s, c => c.charCodeAt(0));
+}
+async function ensurePush() {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Notifications are blocked. Allow them in Android Settings → Apps → Daily Tracker → Notifications.');
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+  await rpc('tracker_save_push', { p_secret: state.sync.secret, p_sub: sub.toJSON() });
+}
+async function saveReminders() {
+  const r = state.settings.reminders;
+  if (r.daily_on || r.weight_on) await ensurePush();
+  await rpc('tracker_set_reminders', { p_secret: state.sync.secret, p_settings: {
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Amsterdam', ...r } });
+  save();
+}
+function renderReminderCard() {
+  const card = $('#reminderCard');
+  card.innerHTML = '';
+  card.append(el('h2', {}, 'Reminders'));
+  if (!pushSupported()) {
+    card.append(el('p', { class: 'muted small' }, 'Add the app to your home screen first (Chrome ⋮ → Add to home screen), then open it from there to turn on reminders.'));
+    return;
+  }
+  if (!Sync.on) {
+    card.append(
+      el('p', { class: 'muted small' }, 'Reminders are sent by the online service, so they arrive even when the app is closed. Turn on online sync to use them (sharing with a partner stays optional).'),
+      el('button', { class: 'btn primary wide', onclick: openStartSheet }, 'Turn on online sync'),
+    );
+    return;
+  }
+  const r = state.settings.reminders;
+  const apply = async (fn, rollback) => {
+    fn(); renderReminderCard();
+    try { await saveReminders(); }
+    catch (e) { rollback(); save(); renderReminderCard(); toast(/fetch|network|load failed/i.test(e.message) ? 'No internet connection. Try again later.' : e.message); }
+  };
+  const timeInput = (key) => {
+    const i = el('input', { type: 'time', value: r[key], class: 'time' });
+    i.onchange = () => { const old = r[key]; if (i.value) apply(() => { r[key] = i.value; }, () => { r[key] = old; }); };
+    return i;
+  };
+  const toggle = (key, label) => {
+    const i = el('input', { type: 'checkbox', id: `rem_${key}` });
+    i.checked = !!r[key];
+    i.onchange = () => { const v = i.checked; apply(() => { r[key] = v; }, () => { r[key] = !v; }); };
+    return el('label', { class: 'toggle', for: `rem_${key}` }, i, ' ', label);
+  };
+  const dow = el('select', { class: 'time' }, DOW.map((d, i) => { const o = el('option', { value: String(i + 1) }, d); if (r.weight_dow === i + 1) o.selected = true; return o; }));
+  dow.onchange = () => { const old = r.weight_dow; apply(() => { r.weight_dow = Number(dow.value); }, () => { r.weight_dow = old; }); };
+  card.append(
+    toggle('daily_on', 'Daily: fill in food, mood and drinks'),
+    r.daily_on ? el('div', { class: 'rem-row' }, el('span', { class: 'muted small' }, 'Every day at'), timeInput('daily_time')) : null,
+    toggle('weight_on', 'Weekly: weigh yourself'),
+    r.weight_on ? el('div', { class: 'rem-row' }, el('span', { class: 'muted small' }, 'Every'), dow, el('span', { class: 'muted small' }, 'at'), timeInput('weight_time')) : null,
+    el('p', { class: 'muted small' }, 'No reminder if you already filled in that day.'),
+    (r.daily_on || r.weight_on) ? el('button', { class: 'btn wide', onclick: async () => {
+      try { const reg = await navigator.serviceWorker.ready; await reg.showNotification('Daily Tracker', { body: 'Reminders work on this phone.', icon: 'icons/icon-192.png' }); }
+      catch (e) { toast('Notifications are blocked on this phone.'); }
+    } }, 'Send a test notification') : null,
+  );
+}
+
 function openStartSheet() {
   const name = el('input', { type: 'text', maxlength: '40', placeholder: 'e.g. Guido', value: state.settings.name || '' });
   const go = el('button', { class: 'btn primary' }, 'Turn on');
   go.onclick = () => {
     if (!name.value.trim()) { name.focus(); return; }
-    busyDo(go, async () => { await Sync.start(name.value.trim()); closeSheet(); render(); toast('Sharing is on. Now connect with your partner.'); });
+    busyDo(go, async () => { await Sync.start(name.value.trim()); closeSheet(); render(); toast('Online sync is on.'); });
   };
   openSheet(el('div', {},
-    el('h3', {}, 'Turn on sharing'),
-    el('div', { class: 'field' }, el('label', {}, 'Your first name (your partner sees this)'), name),
+    el('h3', {}, 'Turn on online sync'),
+    el('p', { class: 'muted small' }, 'Your days are then also stored online: needed for reminders and for sharing with a partner, and safe if you lose your phone. No email or password.'),
+    el('div', { class: 'field' }, el('label', {}, 'Your first name (a partner would see this)'), name),
     el('div', { class: 'sheet-actions' }, el('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), go),
   ));
 }

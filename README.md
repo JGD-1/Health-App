@@ -26,3 +26,10 @@ state = {
 - Sync: changed days are pushed; newest edit per day wins. Partner's days are pulled read-only;
   partner weight is only returned if that partner enabled "share my weight".
 - Moving phones: Settings → More options → Show my key; on the new phone "I already use the app on another phone".
+
+## Reminders
+- Settings → Reminders: daily (food/mood/drinks) at a chosen time, weekly weight on a chosen day + time. Needs online sync.
+- The phone registers a Web Push subscription (`tracker_save_push`); times + time zone are stored per account (`tracker_set_reminders`).
+- pg_cron job `send-reminders` calls the edge function `send-reminders` every 5 minutes. It asks `tracker_due_reminders()`
+  (service role only) what is due, sends with web-push (VAPID keys in `app.config`), and marks it sent so each reminder
+  goes out once per day. A day already filled in (food + mood, or weight for the weekly one) gets no reminder.
