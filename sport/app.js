@@ -2,7 +2,7 @@
    and levels up skills. Data lives on the phone (IndexedDB + localStorage mirror). */
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.2';
 const SCHEMA = 1;
 const TRACKER_LS = 'daily-log-state'; // Dagtracker's data (same web address, so readable here)
 const TRACKER_INBOX = 'dagtracker-sport-inbox'; // days the tracker should mark as "sport: yes"
