@@ -2,7 +2,7 @@
    and levels up skills. Data lives on the phone (IndexedDB + localStorage mirror). */
 'use strict';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 const SCHEMA = 1;
 const TRACKER_LS = 'daily-log-state'; // Dagtracker's data (same web address, so readable here)
 const TRACKER_INBOX = 'dagtracker-sport-inbox'; // days the tracker should mark as "sport: yes"
@@ -195,6 +195,10 @@ function renderTrain() {
       el('div', {}, el('b', {}, tr('Workout in progress')), el('div', { class: 'muted small' }, planTitle(state.active.plan))),
       el('button', { class: 'btn primary', onclick: () => setView('workout') }, tr('Continue'))));
   }
+  const rw = reportWeek();
+  if (rw) root.append(el('div', { class: 'card resume' },
+    el('div', {}, el('b', {}, '📋 ' + tr('Your trainer report is ready')), el('div', { class: 'muted small' }, tr('How last week went and what to focus on'))),
+    el('button', { class: 'btn primary', onclick: () => openReport(rw) }, tr('Open'))));
   root.append(dashboard());
   const s = state.settings;
   fixType();
@@ -207,6 +211,7 @@ function renderTrain() {
   root.append(el('button', { class: 'cta', onclick: makeWorkout }, el('b', {}, tr('Make my workout')), el('span', {}, `${s.minutes}:00 →`)));
   if (s.place === 'home' && s.type !== 'run') root.append(el('p', { class: 'muted small center' }, tr('At home without equipment, pulling is done as a row under a sturdy table.')));
   root.append(el('button', { class: 'btn wide ghost', onclick: openOtherSheet }, '＋ ' + tr('Log another sport')));
+  root.append(trainerSection());
   const last = state.workouts[state.workouts.length - 1];
   if (last) root.append(el('p', { class: 'muted small center' }, tr('Last workout: {what}, {when}', { what: kindLabel(last), when: relDay(last.date) })));
 }
@@ -294,6 +299,84 @@ function dashboard() {
       el('span', { class: 'rec-n' }, String(r.pct)))));
 }
 
+/* ---------- Trainer: sets per muscle, coach notes, weekly report ---------- */
+function setBar(m) {
+  const f = m.sets / m.target;
+  return el('div', { class: 'rec' }, el('span', {}, tr(m.name)),
+    el('div', { class: 'rec-bar' }, el('div', { class: f >= 1 ? 'ok' : f >= 0.6 ? 'mid' : 'low', style: `width:${Math.max(3, Math.min(100, Math.round(100 * f)))}%` })),
+    el('span', { class: 'rec-n' }, `${Math.floor(m.sets)}/${m.target}`));
+}
+function trainerSection() {
+  const list = muscleList(setsPerMuscle(state, new Date(), 7)).filter((m) => m.big);
+  const notes = coachNotes(state, new Date(), state.settings.place).slice(0, 2);
+  return el('div', {},
+    el('div', { class: 'rec-h' }, el('span', {}, tr('Sets per muscle')), el('small', {}, tr('last 7 days · goal 10'))),
+    list.map(setBar),
+    notes.map((n) => el('p', { class: 'note' }, noteText(n))),
+    el('button', { class: 'btn wide ghost', onclick: () => openReport(weekKey(new Date())) }, '📋 ' + tr('Trainer report')));
+}
+function lightText(reason) {
+  if (reason === 'tired') return tr('Lighter week: your last sessions were very heavy (0 reps left, “too heavy”, or lifts stuck). Fewer sets and no weight jumps this week, then you build up again.');
+  if (reason === 'chosen') return tr('Lighter week, as you chose. Fewer sets and no weight jumps.');
+  return tr('Lighter week: you trained 6 weeks in a row. Fewer sets and no weight jumps this week, so your body can catch up. You come back stronger.');
+}
+const PATTERN_NAMES = { squat: 'Squat', lunge: 'Lunge', hinge: 'Hip hinge (deadlift)', hpush: 'Pushing (bench / push-up)', vpush: 'Overhead pressing', hpull: 'Rows', vpull: 'Pull-ups / pulldowns' };
+function noteText(n) {
+  const list = (xs) => xs.map((x) => tr(x).toLowerCase()).join(', ');
+  if (n.k === 'light') return '🌙 ' + lightText(n.reason);
+  if (n.k === 'low') return '🎯 ' + tr('Low this week: {list}. Your next workout puts these first.', { list: list(n.muscles) }) + (n.short ? ' ' + tr('With sessions under 45 min, 10 sets per muscle is hard to reach: pick 45 min now and then, or add a session.') : '');
+  if (n.k === 'morepull') return '⚖️ ' + tr('Last 2 weeks you pushed more than you pulled ({push} vs {pull} sets). Pulling goes first next time.', n);
+  if (n.k === 'morepush') return '⚖️ ' + tr('Last 2 weeks you pulled more than you pushed ({pull} vs {push} sets). Pushing goes first next time.', n);
+  if (n.k === 'morelegs') return '⚖️ ' + tr('Last 2 weeks your legs got less work than your upper body. Legs go first next time.');
+  if (n.k === 'skipped') return '⏰ ' + tr('{what}: not trained for {n} days.', { what: tr(PATTERN_NAMES[n.pattern] || n.pattern), n: n.days });
+  if (n.k === 'novpull') return '🧗 ' + tr('No pull-ups or pulldowns for {n} days (not possible at home). Do a gym session when you can.', { n: n.days });
+  if (n.k === 'stall') return '📉 ' + tr('{ex} has not gone up in 3 sessions. Next time it starts 10% lighter with more reps, then builds back up.', { ex: exName(EX_BY_ID[n.ex]) });
+  return '';
+}
+// The report for last week, if it had workouts and has not been opened yet
+function reportWeek() {
+  const d = weekStart(new Date()); d.setDate(d.getDate() - 7);
+  const wk = dayKey(d);
+  if (state.reportSeen === wk) return null;
+  return state.workouts.some((w) => weekKey(w.date) === wk) ? wk : null;
+}
+function openReport(wk) {
+  const cur = weekKey(new Date());
+  if (wk !== cur) { state.reportSeen = wk; save(); }
+  const r = trainerReport(state, wk), g = state.settings.goals, res = r.res;
+  const fmtD = (k) => parseDay(k).toLocaleDateString(LOC(), { day: 'numeric', month: 'short' });
+  const goal = res.met ? '✅ ' + tr('Week goal reached') : res.token ? '🪙 ' + tr('One session short, saved by your rest token') : '❌ ' + tr('{n} sessions short of your goal', { n: res.short });
+  const up = r.lifts.filter((l) => l.trend === 'up'), flat = r.lifts.filter((l) => l.trend === 'flat'), fresh = r.lifts.filter((l) => l.trend === 'new');
+  const names = (xs) => xs.map((l) => exName(EX_BY_ID[l.ex])).join(', ');
+  const lw = wk === cur ? lightWeek(state, new Date()) : r.light;
+  const thisWeek = wk === cur;
+  const draw = () => {
+    const box = el('div', {},
+      el('h3', {}, '📋 ' + tr('Trainer report')),
+      el('p', { class: 'muted small' }, `${fmtD(wk)} – ${fmtD(r.to)}` + (thisWeek ? ' · ' + tr('so far') : '')),
+      el('div', { class: 'lbl' }, tr('Week goal')),
+      el('p', { class: 'small' }, goal),
+      el('p', { class: 'muted small' }, `${tr('Strength')} ${res.strength}/${g.strength} · ${tr('Running')} ${res.runs}/${g.runs} · ${r.minutes}/150 min` + (r.minutes < 150 ? ' · ' + tr('the Dutch guideline is 150 min a week') : ' ✓')),
+      el('div', { class: 'lbl' }, tr('Hard sets per muscle')),
+      r.muscles.map(setBar),
+      el('p', { class: 'muted small' }, tr('Aim for about 10 hard sets per muscle per week (6 for arms, calves and core). When a muscle only helps, the set counts as half.')),
+      el('div', { class: 'lbl' }, tr('Your lifts')),
+      r.lifts.length ? el('div', { class: 'small' },
+        up.length ? el('p', {}, '⬆ ' + tr('Stronger: {list}', { list: names(up) })) : null,
+        flat.length ? el('p', {}, '→ ' + tr('Same as before: {list}', { list: names(flat) })) : null,
+        fresh.length ? el('p', {}, '✨ ' + tr('New: {list}', { list: names(fresh) })) : null,
+        el('p', { class: 'muted' }, tr('Records: {prs} · Level-ups: {n}', { prs: r.prs, n: r.levelups }))) : el('p', { class: 'muted small' }, tr('No strength workouts this week.')),
+      el('div', { class: 'lbl' }, thisWeek ? tr('Focus') : tr('Focus this week')),
+      r.focus.length ? el('p', { class: 'small' }, '🎯 ' + tr('More sets for: {list}. The generator puts these first.', { list: r.focus.map((m) => tr(m).toLowerCase()).join(', ') })) : el('p', { class: 'small' }, '✅ ' + tr('Every big muscle group reached its goal.')),
+      r.notes.filter((n) => n.k !== 'low' && n.k !== 'light').map((n) => el('p', { class: 'note' }, noteText(n))),
+      lw.active ? el('p', { class: 'note' }, '🌙 ' + lightText(lw.reason)) : el('p', { class: 'muted small' }, lw.skipped ? tr('You skipped the lighter week.') : tr('Next lighter week in about {n} training weeks.', { n: lw.nextIn })),
+      lw.active && lw.reason !== 'chosen' && !state.workouts.some((w) => w.light && weekKey(w.date) === lw.wk) ? el('button', { class: 'btn wide ghost', onclick: () => { state.lightWeeks = state.lightWeeks || {}; state.lightWeeks[lw.wk] = 'skip'; save(); closeSheet(); render(); toast(tr('Normal week then. Listen to your body.')); } }, tr('Skip the lighter week')) : null,
+      el('div', { class: 'sheet-actions' }, el('button', { class: 'btn primary', onclick: () => { closeSheet(); render(); } }, tr('Close'))));
+    openSheet(box);
+  };
+  draw();
+}
+
 function makeWorkout() {
   const s = state.settings;
   if (s.type === 'gym' && !s.startWeightsAsked) return openStartWeights(makeWorkout);
@@ -341,6 +424,7 @@ function renderWorkout() {
   root.append(el('div', { class: 'card plan-head' },
     el('div', {}, el('b', {}, planTitle(p)), el('div', { class: 'muted small' }, tr('About {n} min', { n: p.estimate }) + (a.started ? ' · ' + tr('started {t}', { t: new Date(a.started).toLocaleTimeString(LOC(), { hour: '2-digit', minute: '2-digit' }) }) : ''))),
     a.started ? el('div', { class: 'clock', id: 'clock' }, '0:00') : el('button', { class: 'btn primary', onclick: () => { a.started = new Date().toISOString(); save(); keepAwake(true); render(); } }, tr('Start'))));
+  if (p.light) root.append(el('p', { class: 'note' }, '🌙 ' + lightText(p.lightReason)));
   p.blocks.forEach((b, bi) => root.append(blockCard(a, b, bi)));
   if (p.cardio) root.append(el('div', { class: 'card' }, el('div', { class: 'card-head' }, el('h2', {}, tr('Cardio')), el('span', { class: 'muted' }, `${p.cardio.minutes} min`)),
     el('p', { class: 'small' }, p.cardio.what === 'walk' ? tr('Brisk walk or easy jog. You should still be able to talk.') : tr('Bike, rower or treadmill at an easy, steady pace.'))));
@@ -383,7 +467,7 @@ function itemView(a, b, it, label, bi, ii) {
   const ex = EX_BY_ID[it.ex];
   const r = parseReps(ex.x);
   const timed = r.unit === 's';
-  const note = it.tooHeavy ? tr('Lowered. Next time you start at this weight.') : { up: tr('Heavier than last time 💪'), deload: tr('A bit lighter to reset, then build up again'), first: tr('First time: pick a weight you could lift 2–3 more times'), estimate: tr('Suggested weight. Too heavy? Tap “Too heavy”.'), lighter: tr('Lighter after last time, build up from here'), top: tr('Top of the range: try the level-up test') }[it.note];
+  const note = it.tooHeavy ? tr('Lowered. Next time you start at this weight.') : { up: tr('Heavier than last time 💪'), deload: tr('A bit lighter to reset, then build up again'), first: tr('First time: pick a weight you could lift 2–3 more times'), estimate: tr('Suggested weight. Too heavy? Tap “Too heavy”.'), lighter: tr('Lighter after last time, build up from here'), top: tr('Top of the range: try the level-up test'), reset: tr('Stuck for 3 sessions: 10% lighter with more reps, then build back up'), light: tr('Lighter week: same weight, fewer sets, stop well before failure') }[it.note];
   const rows = it.sets.map((s, si) => {
     const done = s.done;
     const repsBox = stepper(s.reps, timed ? 5 : 1, (v) => { s.reps = v; save(); }, timed ? 's' : tr('reps'));
@@ -515,7 +599,8 @@ function finish(effort, minutes, km) {
     w.completed = !!(a.run && a.run.finished);
     w.patterns = [];
   } else {
-    w.items = p.blocks.flatMap((b) => b.items).map((it) => ({ ex: it.ex, sets: it.sets.map((s) => ({ reps: s.reps, kg: s.kg, done: !!s.done })), rir: it.rir ?? null, tooHeavy: !!it.tooHeavy }));
+    w.items = p.blocks.flatMap((b) => b.items).map((it) => ({ ex: it.ex, sets: it.sets.map((s) => ({ reps: s.reps, kg: s.kg, done: !!s.done })), rir: it.rir ?? null, tooHeavy: !!it.tooHeavy, note: it.note || null }));
+    if (p.light) { w.light = true; w.lightReason = p.lightReason || null; }
     w.patterns = [...new Set(p.blocks.filter((b) => b.items.some((it) => it.sets.some((s) => s.done))).flatMap((b) => b.patterns))];
   }
   const before = characterLevel(state);

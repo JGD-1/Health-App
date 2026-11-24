@@ -114,9 +114,15 @@ function lastTrained(state) {
   for (const w of state.workouts) for (const p of w.patterns || []) if (!out[p] || out[p] < w.date) out[p] = w.date;
   return out;
 }
+// Priority: muscles furthest below their weekly set target first, then the pattern trained longest ago.
+// A pattern trained yesterday or today goes to the back (recovery).
 function rankPatterns(state, patterns, today) {
   const lt = lastTrained(state);
-  const score = (p) => (lt[p] ? daysBetween(lt[p], today) : 999);
+  const week = setsPerMuscle(state, today, 7);
+  const score = (p) => {
+    const d = lt[p] ? daysBetween(lt[p], today) : 99;
+    return Math.min(d, 14) + 6 * patternDeficit(p, week) - (d <= 1 ? 20 : 0);
+  };
   return [...patterns].sort((a, b) => score(b) - score(a) || RANK_ORDER.indexOf(a) - RANK_ORDER.indexOf(b));
 }
 
@@ -174,7 +180,7 @@ function estimateKg(state, ex, reps) {
 }
 
 /* ---------- prescription: sets, reps, weight from the last session ---------- */
-function prescribe(state, ex, sets, role) {
+function prescribe(state, ex, sets, role, light) {
   const r = parseReps(ex.x);
   const item = { ex: ex.id, role, sets: [], target: r.lo, kg: null, note: '' };
   const last = lastLog(state, ex.id);
@@ -187,13 +193,19 @@ function prescribe(state, ex, sets, role) {
       const atKg = last.sets.filter((s) => (Number(s.kg) || 0) === kg);
       const allTop = atKg.length >= Math.min(sets, last.sets.length) && atKg.every((s) => s.reps >= r.hi);
       const missed = atKg.some((s) => s.reps < r.lo);
-      if (allTop) {
+      const st = !light && !last.tooHeavy ? stallInfo(state, ex.id) : null;
+      if (light) {
+        item.kg = kg; item.target = r.lo; item.note = 'light';
+      } else if (st) {
+        item.kg = roundKg(kg * 0.9, ex); item.target = r.hi; item.note = 'reset';
+      } else if (allTop) {
         const jump = last.rir != null && last.rir >= 3 ? 2 : 1;
         item.kg = roundKg(kg + kgStep(ex) * jump, ex); item.target = r.lo; item.note = 'up';
       } else if (missed && recentLogs(state, ex.id, 3).length === 3 && recentLogs(state, ex.id, 3).every((it) => it.sets.filter((s) => s.done).some((s) => s.reps < r.lo))) {
         item.kg = roundKg(kg * 0.9, ex); item.target = r.lo; item.note = 'deload';
       } else {
-        item.kg = kg; item.target = Math.min(r.hi, Math.max(r.lo, Math.min(...atKg.map((s) => s.reps)) + 1)); item.note = 'same';
+        const add = last.rir != null && last.rir >= 3 ? 2 : 1; // lots left in the tank: aim for more reps
+        item.kg = kg; item.target = Math.min(r.hi, Math.max(r.lo, Math.min(...atKg.map((s) => s.reps)) + add)); item.note = 'same';
       }
     } else {
       item.note = 'first';
@@ -204,8 +216,8 @@ function prescribe(state, ex, sets, role) {
   } else if (last) {
     const worst = Math.min(...last.sets.map((s) => Number(s.reps) || 0));
     const step = r.unit === 's' ? 5 : 1;
-    item.target = Math.min(r.hi, Math.max(r.lo, worst + step));
-    item.note = worst >= r.hi ? 'top' : 'same';
+    item.target = light ? Math.max(r.lo, Math.min(r.hi, worst)) : Math.min(r.hi, Math.max(r.lo, worst + step));
+    item.note = light ? 'light' : worst >= r.hi ? 'top' : 'same';
   }
   for (let i = 0; i < sets; i++) item.sets.push({ reps: item.target, kg: item.kg, done: false });
   item.rest = role === 'main' ? Math.min(180, Math.max(120, ex.rest || 150)) : role === 'finisher' ? 45 : SUPERSET_REST;
@@ -267,7 +279,8 @@ function generateStrength(state, opts) {
   const patterns = Object.keys(map).filter((p) => p !== 'core');
   const ranked = rankPatterns(state, patterns, today);
   const best = (list) => ranked.find((p) => list.includes(p));
-  const sets = minutes <= 15 ? 2 : 3;
+  const lw = lightWeek(state, today), light = lw.active;
+  const sets = minutes <= 15 || light ? 2 : 3;
   const used = new Set();
   const chosen = [];
   let main = null;
@@ -297,30 +310,34 @@ function generateStrength(state, opts) {
     return ex;
   };
   const blocks = [];
-  if (main) { const ex = pickEx(main); if (ex) blocks.push({ kind: 'main', patterns: [main], items: [prescribe(state, ex, 3, 'main')] }); }
+  if (main) { const ex = pickEx(main); if (ex) blocks.push({ kind: 'main', patterns: [main], items: [prescribe(state, ex, light ? 2 : 3, 'main', light)] }); }
   for (const pair of pairUp(chosen)) {
-    const items = pair.map((p) => { const ex = pickEx(p); return ex ? prescribe(state, ex, sets, 'superset') : null; }).filter(Boolean);
+    const items = pair.map((p) => { const ex = pickEx(p); return ex ? prescribe(state, ex, sets, 'superset', light) : null; }).filter(Boolean);
     if (items.length) blocks.push({ kind: 'superset', patterns: pair, items });
   }
   if (minutes >= 45) {
     let extra = null;
     if (mode === 'gym') {
       const lt = lastTrainedEx(state);
-      extra = [...GYM_ACCESSORIES].sort((a, b) => (lt[a[0]] || '').localeCompare(lt[b[0]] || ''))[0].map((id) => EX_BY_ID[id]);
-      blocks.push({ kind: 'accessory', patterns: [], items: extra.map((ex) => prescribe(state, ex, 3, 'superset')) });
+      const week = setsPerMuscle(state, today, 7);
+      const need = (pair) => pair.reduce((a, id) => a + exDeficit(EX_BY_ID[id], week), 0);
+      extra = [...GYM_ACCESSORIES].sort((a, b) => need(b) - need(a) || (lt[a[0]] || '').localeCompare(lt[b[0]] || ''))[0].map((id) => EX_BY_ID[id]);
+      blocks.push({ kind: 'accessory', patterns: [], items: extra.map((ex) => prescribe(state, ex, sets, 'superset', light)) });
     } else {
       let rest = rankPatterns(state, patterns.filter((p) => !used.has(p)), today).slice(0, 2);
       if (rest.length < 2) rest = [...rest, ...ranked.filter((p) => !rest.includes(p))].slice(0, 2); // repeat a pattern with an easier variant
-      const items = rest.map((p) => { used.add(p); const ex = pickEx(p, true); return ex ? prescribe(state, ex, 3, 'superset') : null; }).filter(Boolean);
+      const items = rest.map((p) => { used.add(p); const ex = pickEx(p, true); return ex ? prescribe(state, ex, sets, 'superset', light) : null; }).filter(Boolean);
       if (items.length) blocks.push({ kind: 'accessory', patterns: rest, items });
     }
     const core = pickEx('core');
-    if (core) blocks.push({ kind: 'core', patterns: ['core'], items: [prescribe(state, core, 3, 'finisher')] });
+    if (core) blocks.push({ kind: 'core', patterns: ['core'], items: [prescribe(state, core, sets, 'finisher', light)] });
   }
+  // At home rows are the only pull: one extra set keeps pushing and pulling in balance.
+  if (mode === 'home' && !light) for (const b of blocks) for (const it of b.items) if (EX_BY_ID[it.ex].p === 'hpull') it.sets.push({ ...it.sets[it.sets.length - 1], done: false });
   const firstEx = blocks.length ? EX_BY_ID[blocks[0].items[0].ex] : null;
   const plan = {
     kind: mode === 'gym' ? 'gym' : 'cali', place: mode === 'home' ? 'home' : 'gym', mode, minutes,
-    warmup: null, blocks, // Guido skips the warm-up (2026-11-24), so none is planned
+    warmup: null, blocks, light, lightReason: light ? lw.reason : null, // Guido skips the warm-up (2026-11-24), so none is planned
     cardio: minutes >= 60 ? { minutes: 10, what: mode === 'home' ? 'walk' : 'bike' } : null,
   };
   fitToTime(state, plan, mode);
@@ -343,11 +360,11 @@ function fitToTime(state, plan, mode) {
   }
   if (target - estimate(plan) >= 3 && !plan.blocks.some((b) => b.kind === 'core')) {
     const ex = exerciseFor(state, 'Core', mode);
-    if (ex) plan.blocks.push({ kind: 'core', patterns: ['core'], items: [prescribe(state, ex, 2, 'finisher')] });
+    if (ex) plan.blocks.push({ kind: 'core', patterns: ['core'], items: [prescribe(state, ex, 2, 'finisher', plan.light)] });
     while (estimate(plan) > target && plan.blocks[plan.blocks.length - 1].items[0].sets.length > 1) plan.blocks[plan.blocks.length - 1].items[0].sets.pop();
     if (estimate(plan) > target) plan.blocks.pop();
   }
-  guard = 20;
+  guard = plan.light ? 0 : 20; // a lighter week stays shorter on purpose
   while (target - estimate(plan) >= 3 && guard--) {
     const b = plan.blocks.find((x) => x.kind !== 'core' && Math.max(...x.items.map((i) => i.sets.length)) < 4);
     if (!b) break;
@@ -444,9 +461,11 @@ function testPassed(state, ex, item) {
 // Applies level-ups for a finished workout. Returns a list of events to celebrate.
 function applyProgress(state, w) {
   const events = [];
+  if (w.light) { if (state.lastLight !== weekKey(w.date)) state.lastLightReason = w.lightReason || 'six'; state.lastLight = weekKey(w.date); }
   for (const it of w.items || []) {
     const ex = EX_BY_ID[it.ex];
     if (!ex) continue;
+    if (it.note === 'reset' && it.sets.some((s) => s.done)) { state.resets = state.resets || {}; state.resets[ex.id] = w.date; }
     if (ex.l && ladderLevel(state, ex.l) === ex.lv && testPassed(state, ex, it)) {
       const next = ladderExercises(ex.l).find((x) => x.lv > ex.lv);
       state.ladders[ex.l] = { level: next ? next.lv : ex.lv, at: w.date, mastered: !next };
@@ -628,4 +647,191 @@ function weekVolume(state, today) {
   return state.workouts.filter((w) => weekKey(w.date) === wk).reduce((a, w) => a + volume(w), 0);
 }
 
-if (typeof module !== 'undefined') module.exports = { recovery, weekVolume, volume, rankFor, checkBadges, BADGES, estimateKg, ANCHORS, anchorKg, generateStrength, generateRun, applyProgress, parseReps, parseTest, characterLevel, streak, weekResult, tierFor, TIERS, estimate, exerciseFor, LADDERS, SKILL_LADDERS, EX_BY_ID, dayKey, weekKey, ladderExercises, maxLevel, runLevel, ladderLevel, lastLog, bodyweight, longestRun };
+/* ---------- trainer checks: weekly sets per muscle, stalls, lighter weeks, balance ----------
+   Evidence: ~10+ hard sets per muscle per week, diminishing returns above ~20 (Schoenfeld 2017; Pelland et al. 2024).
+   An indirect set counts as half ("fractional" counting, best fit in Pelland et al.). Lighter week every ~4–6 weeks,
+   mainly fewer sets (Bell et al. 2023 deload consensus). */
+const MUSCLE_KEYS = ['chest', 'back', 'shoulders', 'quads', 'hamstrings', 'glutes', 'biceps', 'triceps', 'calves', 'core'];
+const BIG_MUSCLES = ['chest', 'back', 'shoulders', 'quads', 'hamstrings', 'glutes'];
+const MUSCLE_NAMES = { chest: 'Chest', back: 'Back muscles', shoulders: 'Shoulders', quads: 'Quads', hamstrings: 'Hamstrings', glutes: 'Glutes', biceps: 'Biceps', triceps: 'Triceps', calves: 'Calves', core: 'Core' };
+// Weekly hard-set targets. Small muscles also get half sets from the big lifts, so 6 direct-equivalent sets is enough.
+const MUSCLE_TARGET = { chest: 10, back: 10, shoulders: 10, quads: 10, hamstrings: 10, glutes: 10, biceps: 6, triceps: 6, calves: 6, core: 6 };
+const PATTERN_MUSCLES = {
+  hpush: { chest: 1, triceps: 0.5, shoulders: 0.5 }, vpush: { shoulders: 1, triceps: 0.5 },
+  hpull: { back: 1, biceps: 0.5 }, vpull: { back: 1, biceps: 0.5 },
+  squat: { quads: 1, glutes: 0.5 }, lunge: { quads: 1, glutes: 0.5 }, hinge: { hamstrings: 1, glutes: 1 },
+  core: { core: 1 }, carry: { core: 1 },
+};
+// Exercises that work other muscles than their pattern suggests
+const MUSCLE_OVERRIDES = {
+  EX011: { glutes: 1, hamstrings: 0.5 }, EX012: { hamstrings: 1 }, EX017: { chest: 1, triceps: 1, shoulders: 0.5 },
+  EX020: { shoulders: 1 }, EX024: { shoulders: 1, back: 0.5 }, EX026: { back: 1, biceps: 1 }, EX031: { biceps: 1 }, EX032: { triceps: 1 },
+  EX033: { calves: 1 }, EX037: { core: 1, shoulders: 0.5 }, EX038: { glutes: 1, hamstrings: 1 }, EX047: { shoulders: 1, back: 0.5 },
+  EX048: { quads: 1, glutes: 0.5, shoulders: 0.5 }, EX055: { chest: 1, triceps: 1 }, EX060: { back: 0.5 }, EX061: { back: 0.5 },
+  EX065: { back: 1, biceps: 1 }, EX068: { back: 1, biceps: 1 }, EX069: { chest: 0.5, triceps: 0.5 }, EX070: { chest: 1, triceps: 1, shoulders: 0.5 },
+  EX071: { chest: 1, triceps: 1, shoulders: 0.5 }, EX072: { chest: 1, triceps: 1, shoulders: 0.5 }, EX079: { glutes: 1, hamstrings: 0.5 },
+  EX080: { glutes: 1, hamstrings: 0.5 }, EX082: { hamstrings: 1 }, EX090: { shoulders: 1, triceps: 0.5 }, EX091: { shoulders: 1, triceps: 0.5 },
+  EX092: { shoulders: 0.5 }, EX093: { shoulders: 1, triceps: 1 }, EX094: { shoulders: 0.5 },
+};
+function exMuscles(ex) {
+  if (!ex || ex.t === 'Warm-up' || ex.t === 'Run') return {};
+  return MUSCLE_OVERRIDES[ex.id] || PATTERN_MUSCLES[ex.p] || {};
+}
+// Hard sets per muscle between two day keys (inclusive)
+function muscleSetsBetween(state, from, to) {
+  const out = Object.fromEntries(MUSCLE_KEYS.map((m) => [m, 0]));
+  for (const w of state.workouts) {
+    if (w.date < from || w.date > to) continue;
+    for (const it of w.items || []) {
+      const n = it.sets.filter((x) => x.done).length;
+      if (!n) continue;
+      for (const [m, f] of Object.entries(exMuscles(EX_BY_ID[it.ex]))) out[m] += n * f;
+    }
+  }
+  return out;
+}
+// Last `days` days up to and including today
+function setsPerMuscle(state, today, days) {
+  const t = parseDay(dayKey(today || new Date()));
+  const from = new Date(t); from.setDate(from.getDate() - (days - 1));
+  return muscleSetsBetween(state, dayKey(from), dayKey(t));
+}
+function muscleList(sets) {
+  return MUSCLE_KEYS.map((m) => ({ key: m, name: MUSCLE_NAMES[m], sets: Math.round(sets[m] * 2) / 2, target: MUSCLE_TARGET[m], big: BIG_MUSCLES.includes(m) }));
+}
+// How far a pattern's / exercise's muscles are below target this week (0 = all on target)
+function deficitOf(map, week) {
+  let d = 0;
+  for (const [m, f] of Object.entries(map)) d += f * Math.max(0, 1 - (week[m] || 0) / MUSCLE_TARGET[m]);
+  return d;
+}
+function patternDeficit(p, week) { return deficitOf(PATTERN_MUSCLES[p] || {}, week); }
+function exDeficit(ex, week) { return deficitOf(exMuscles(ex), week); }
+
+// Strength of one logged item: estimated 1-rep max (Epley) for weights, best reps / seconds otherwise
+function itemBest(ex, it) {
+  const done = it.sets.filter((x) => x.done);
+  if (!done.length) return 0;
+  if (ex.w) return Math.max(...done.map((x) => (Number(x.kg) || 0) * (1 + (Number(x.reps) || 0) / 30)));
+  return Math.max(...done.map((x) => Number(x.reps) || 0));
+}
+function exHistory(state, exId, after) {
+  const ex = EX_BY_ID[exId], out = [];
+  for (const w of state.workouts) {
+    if (after && w.date <= after) continue;
+    for (const it of w.items || []) if (it.ex === exId && it.sets.some((x) => x.done)) { out.push({ date: w.date, best: itemBest(ex, it), kg: Math.max(0, ...it.sets.filter((x) => x.done).map((x) => Number(x.kg) || 0)) }); break; }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+// A weighted lift is stalled when the last 3 sessions (spread over 7+ days) beat nothing done before them.
+function stallInfo(state, exId) {
+  const ex = EX_BY_ID[exId];
+  if (!ex || !ex.w) return null;
+  const h = exHistory(state, exId, (state.resets || {})[exId]);
+  if (h.length < 4) return null;
+  const last3 = h.slice(-3), before = h.slice(0, -3);
+  const ref = Math.max(...before.map((x) => x.best)), recent = Math.max(...last3.map((x) => x.best));
+  const refKg = Math.max(...before.map((x) => x.kg)), recentKg = Math.max(...last3.map((x) => x.kg));
+  // progress = a higher estimated max OR a heavier weight (after a weight jump the reps drop, which is normal)
+  if (recent > ref + 0.01 || recentKg > refKg + 0.01 || daysBetween(last3[0].date, last3[2].date) < 7) return null;
+  return { ex: exId, since: last3[0].date, best: Math.round(ref) };
+}
+function stalledLifts(state) {
+  const ids = new Set();
+  for (const w of state.workouts) for (const it of w.items || []) ids.add(it.ex);
+  return [...ids].map((id) => stallInfo(state, id)).filter(Boolean);
+}
+
+// Lighter week: after 6 training weeks, or from 3 weeks when tiredness shows (many sets with 0 reps left,
+// "too heavy" taps or 2+ stalled lifts). Decided from data before this week, so it stays the same all week.
+function lightWeek(state, today) {
+  const wk = weekKey(today || new Date());
+  const choice = (state.lightWeeks || {})[wk];
+  if (choice === 'skip') return { active: false, skipped: true, wk };
+  if (state.lastLight === wk || choice === 'on') return { active: true, reason: state.lastLight === wk ? state.lastLightReason || 'six' : 'chosen', wk };
+  const weeks = new Set(strengthWorkouts(state).filter((w) => weekKey(w.date) < wk && (!state.lastLight || weekKey(w.date) > state.lastLight)).map((w) => weekKey(w.date)));
+  const n = weeks.size;
+  if (n >= 6) return { active: true, reason: 'six', weeks: n, wk };
+  const start = parseDay(wk), from = new Date(start); from.setDate(from.getDate() - 14);
+  const recent = strengthWorkouts(state).filter((w) => w.date >= dayKey(from) && w.date < wk);
+  let rir0 = 0, heavy = 0;
+  for (const w of recent) for (const it of w.items || []) { if (it.rir === 0) rir0++; if (it.tooHeavy) heavy++; }
+  const stalls = stalledLifts(state).length;
+  if (n >= 3 && (rir0 >= 4 || heavy >= 3 || stalls >= 2)) return { active: true, reason: 'tired', weeks: n, rir0, heavy, stalls, wk };
+  return { active: false, weeks: n, nextIn: Math.max(1, 6 - n), wk };
+}
+
+// Sets per movement group in a period, for the balance check
+function patternSets(state, from, to) {
+  const out = { push: 0, pull: 0, legs: 0, hpush: 0, hpull: 0 };
+  for (const w of state.workouts) {
+    if (w.date < from || w.date > to) continue;
+    for (const it of w.items || []) {
+      const p = (EX_BY_ID[it.ex] || {}).p, n = it.sets.filter((x) => x.done).length;
+      if (PUSH.includes(p)) out.push += n; else if (PULL.includes(p)) out.pull += n; else if ([...SQUATS, 'hinge'].includes(p)) out.legs += n;
+      if (p === 'hpush' || p === 'hpull') out[p] += n;
+    }
+  }
+  return out;
+}
+// The trainer's notes for right now: low muscles, balance, skipped movements, stalls, lighter week.
+function coachNotes(state, today, place) {
+  today = today || new Date();
+  const notes = [];
+  const t = dayKey(today);
+  const d14 = new Date(parseDay(t)); d14.setDate(d14.getDate() - 13);
+  const recent = strengthWorkouts(state).filter((w) => w.date >= dayKey(d14) && w.date <= t);
+  const lw = lightWeek(state, today);
+  if (lw.active) notes.push({ k: 'light', reason: lw.reason });
+  if (recent.length >= 2) {
+    const low = muscleList(setsPerMuscle(state, today, 7)).filter((m) => m.big && m.sets < m.target * 0.6).sort((a, b) => a.sets / a.target - b.sets / b.target);
+    const avgMin = recent.reduce((a, w) => a + (Number(w.minutes) || 0), 0) / recent.length;
+    if (low.length && !lw.active) notes.push({ k: 'low', muscles: low.slice(0, 3).map((m) => m.name), short: avgMin < 40 });
+    const ps = patternSets(state, dayKey(d14), t);
+    // at home there is no vertical pull, so only compare horizontal pushing and pulling there
+    const homeOnly = recent.every((w) => w.place === 'home');
+    const push = homeOnly ? ps.hpush : ps.push, pull = homeOnly ? ps.hpull : ps.pull;
+    if (push >= 6 && pull < push * 0.75) notes.push({ k: 'morepull', push, pull });
+    else if (pull >= 6 && push < pull * 0.75) notes.push({ k: 'morepush', push, pull });
+    const upperAvg = (ps.push + ps.pull) / 2;
+    if (upperAvg >= 6 && ps.legs < upperAvg * 0.6) notes.push({ k: 'morelegs', legs: ps.legs, upper: ps.push + ps.pull });
+  }
+  if (strengthWorkouts(state).length >= 3) {
+    const lt = lastTrained(state);
+    const mode = place === 'home' ? 'home' : 'gym';
+    for (const p of Object.keys(LADDERS[mode]).filter((x) => x !== 'core')) {
+      const d = lt[p] ? daysBetween(lt[p], today) : null;
+      if (d != null && d >= 10) notes.push({ k: 'skipped', pattern: p, days: d });
+    }
+    if (mode === 'home' && lt.vpull && daysBetween(lt.vpull, today) >= 14) notes.push({ k: 'novpull', days: daysBetween(lt.vpull, today) });
+  }
+  for (const st of stalledLifts(state)) notes.push({ k: 'stall', ex: st.ex });
+  return notes;
+}
+// Report for one finished week (Monday key): goal, minutes, sets per muscle, lifts up/flat, level-ups, focus for next week.
+function trainerReport(state, wk) {
+  const start = parseDay(wk), end = new Date(start); end.setDate(end.getDate() + 6);
+  const to = dayKey(end);
+  const res = weekResult(state, wk);
+  const muscles = muscleList(muscleSetsBetween(state, wk, to));
+  const lifts = [];
+  const seen = new Set();
+  let levelups = 0, prs = 0;
+  for (const w of state.workouts.filter((x) => x.date >= wk && x.date <= to)) {
+    for (const e of w.events || []) { if (e.k === 'levelup' || e.k === 'mastered') levelups++; if (e.k === 'pr') prs++; }
+    for (const it of w.items || []) {
+      const ex = EX_BY_ID[it.ex];
+      if (!ex || seen.has(ex.id) || !it.sets.some((x) => x.done) || ex.p === 'core' || ex.p === 'carry') continue;
+      seen.add(ex.id);
+      const h = exHistory(state, ex.id);
+      const before = h.filter((x) => x.date < wk), during = h.filter((x) => x.date >= wk && x.date <= to);
+      const now = Math.max(...during.map((x) => x.best)), prev = before.length ? Math.max(...before.map((x) => x.best)) : null;
+      lifts.push({ ex: ex.id, trend: prev == null ? 'new' : now > prev + 0.01 ? 'up' : 'flat', stalled: !!stallInfo(state, ex.id) });
+    }
+  }
+  const next = new Date(start); next.setDate(next.getDate() + 7);
+  const focus = muscles.filter((m) => m.big && m.sets < m.target).sort((a, b) => a.sets / a.target - b.sets / b.target).slice(0, 2).map((m) => m.name);
+  return { wk, to, res, minutes: res.minutes, muscles, lifts, levelups, prs, focus, light: lightWeek(state, next), notes: coachNotes(state, end, state.settings && state.settings.place) };
+}
+
+if (typeof module !== 'undefined') module.exports = { setsPerMuscle, muscleList, muscleSetsBetween, stallInfo, stalledLifts, lightWeek, coachNotes, trainerReport, exMuscles, MUSCLE_TARGET, recovery, weekVolume, volume, rankFor, checkBadges, BADGES, estimateKg, ANCHORS, anchorKg, generateStrength, generateRun, applyProgress, parseReps, parseTest, characterLevel, streak, weekResult, tierFor, TIERS, estimate, exerciseFor, LADDERS, SKILL_LADDERS, EX_BY_ID, dayKey, weekKey, ladderExercises, maxLevel, runLevel, ladderLevel, lastLog, bodyweight, longestRun };

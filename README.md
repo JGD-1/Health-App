@@ -56,3 +56,12 @@ When changing files, bump `CACHE` in `sport/sw.js` and `APP_VERSION` in `sport/a
   remaining sets 10% and the next workout starts there. Gym ladders start at the barbell lifts (`DEFAULT_LEVELS`).
 - Gamification (v2): ranks from character level, 17 badges (`BADGES`), celebration screen with kg lifted. No coins, shop or leaderboards.
 - Design (v3, "Neon + Data"): start screen is one week-goal ring (strength, runs, minutes), a thin rank bar, a stats row (volume this week, streak, badges) and a recovery list per muscle group (`recovery()` in engine.js: 48 h after strength, 24 h for legs after a run). Gym/home, type and time sit in one sheet behind three small buttons.
+- Trainer checks (v3.1, `engine.js`): every exercise maps to muscles (`PATTERN_MUSCLES` + `MUSCLE_OVERRIDES`; helper muscle = half a set).
+  Weekly hard sets per muscle (target 10 for chest, back, shoulders, quads, hamstrings, glutes; 6 for biceps, triceps, calves, core).
+  The generator ranks patterns by how far their muscles are below target (last 7 days), then by days since trained; gym accessories
+  go to the most-needed pair. Stall: a weighted lift with 3 sessions (7+ days) without a higher estimated max or heavier weight
+  starts 10% lighter at the top of its rep range (`state.resets`). Lighter week (`lightWeek()`): after 6 training weeks, or from 3 weeks
+  when 4+ sets rated 0 reps left / 3+ "too heavy" / 2+ stalled lifts in the 2 weeks before; 2 sets per exercise, no weight jumps, not
+  padded to time; can be skipped (`state.lightWeeks`). `coachNotes()`: low muscles, push/pull and legs balance (horizontal only at home;
+  rows get +1 set at home), pattern not trained 10+ days, no vertical pull at home 14+ days, stalls. `trainerReport(wk)`: weekly report,
+  offered on the start screen once per finished week (`state.reportSeen`).
