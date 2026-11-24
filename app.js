@@ -2,7 +2,7 @@
    Data lives on the phone (IndexedDB + localStorage mirror). Partner sync plugs in via the Sync object. */
 'use strict';
 
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 const VAPID_PUBLIC = 'BGDrlOvXvSGbsm_TN3JPTtLm4LiTMAoMRHi9E4iH0XVlDueHdl6VzO3bSB5c0_e1-2YoR3lvN3E2YDiEtw1mMgk';
 const SUPABASE_URL = 'https://fvwdcyucxiiycdefqxtf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XwWKCUSP5-DFqJD-Q9ZUpw_KeYwGibY'; // public key; data is protected by each phone's secret key
@@ -255,6 +255,16 @@ function updateDay(k, fn) {
   save();
   Sync.dayChanged(k, state.days[k] || null);
 }
+// The Training app (sport/) leaves the days with a finished workout here, so they show as "sport: yes".
+const SPORT_INBOX = 'dagtracker-sport-inbox';
+function applySportInbox() {
+  let inbox;
+  try { inbox = JSON.parse(localStorage.getItem(SPORT_INBOX) || '{}'); } catch (e) { return; }
+  const keys = Object.keys(inbox || {});
+  if (!keys.length) return;
+  for (const k of keys) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && !myDay(k).sport) updateDay(k, (d) => { d.sport = true; });
+  try { localStorage.removeItem(SPORT_INBOX); } catch (e) { /* ignore */ }
+}
 // Summary over a list of date keys for one person's days
 function summarise(keys, days) {
   const t = todayKey();
@@ -400,7 +410,8 @@ function renderDay() {
     el('span', { class: 'st-emoji' }, '🏃'),
     el('span', { class: 'st-text' }, el('b', {}, d.sport ? tr('Yes, I exercised') : tr('No sport yet')), el('small', {}, d.sport ? tr('Tap to undo') : tr('Tap if you exercised today'))),
     el('span', { class: 'st-check' }, d.sport ? '✓' : '')));
-  $('#sportHint').textContent = '';
+  $('#sportHint').innerHTML = '';
+  $('#sportHint').append(el('a', { href: 'sport/', class: 'sport-link' }, tr('Open Training') + ' →'));
 
   const total = drinksOf(d);
   $('#drinkSummary').textContent = total ? tr('{n} today', { n: total }) : tr('None');
@@ -969,6 +980,7 @@ function bind() {
     if (document.hidden) return;
     const t = todayKey();
     if (t !== lastToday) { if (dayKey === lastToday) dayKey = t; lastToday = t; }
+    applySportInbox();
     render();
     Sync.run();
   });
@@ -977,6 +989,7 @@ function bind() {
 (async function init() {
   state = await loadState();
   save();
+  applySportInbox();
   bind();
   render();
   Sync.run();

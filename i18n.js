@@ -8,7 +8,7 @@ const NL = {
   'Back to today': 'Terug naar vandaag', 'Back to now': 'Terug naar nu',
   'Cancel': 'Annuleren', 'Save': 'Opslaan', 'Clear': 'Wissen', 'Done': 'Klaar', 'Copy': 'Kopiëren',
   'Continue': 'Verder', 'Connect': 'Koppelen', 'Restore': 'Terugzetten', 'Turn on': 'Aanzetten',
-  'One moment…': 'Even geduld…', 'Daily Tracker': 'Dagtracker',
+  'One moment…': 'Even geduld…', 'Open Training': 'Training openen', 'Daily Tracker': 'Dagtracker',
   'Me': 'Ik', 'me': 'ik', 'you': 'jij', 'Both': 'Beiden', 'Partner': 'Partner', 'partner': 'partner',
   'Week': 'Week', 'Month': 'Maand', 'Year': 'Jaar',
 
