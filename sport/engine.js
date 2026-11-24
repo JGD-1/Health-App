@@ -84,7 +84,12 @@ function kgStep(ex) {
 function roundKg(kg, ex) { const st = kgStep(ex) === 2.5 ? 2.5 : kgStep(ex) === 4 ? 4 : 1; return Math.max(0, Math.round(kg / st) * st); }
 
 /* ---------- state helpers ---------- */
-function ladderLevel(state, ladder) { return (state.ladders[ladder] && state.ladders[ladder].level) || 1; }
+// Guido trained regularly before: gym ladders start at the main barbell lifts unless set otherwise.
+const DEFAULT_LEVELS = { 'Squat (gym)': 3, 'Hinge (gym)': 3, 'Push (gym)': 3, 'Overhead (gym)': 2, 'Row (gym)': 2, 'Lunge (gym)': 2, 'Vertical pull (gym)': 1 };
+function ladderLevel(state, ladder) {
+  if (state.ladders[ladder] && state.ladders[ladder].level) return state.ladders[ladder].level;
+  return (state.settings && state.settings.experienced !== false && DEFAULT_LEVELS[ladder]) || 1;
+}
 function ladderExercises(ladder) { return EXERCISES.filter((x) => x.l === ladder).sort((a, b) => a.lv - b.lv); }
 function maxLevel(ladder) { const xs = ladderExercises(ladder); return xs.length ? xs[xs.length - 1].lv : 1; }
 function available(ex, mode) {
@@ -121,7 +126,7 @@ function lastLog(state, exId, beforeId) {
     const w = state.workouts[i];
     if (beforeId && w.id === beforeId) continue;
     for (const it of w.items || []) {
-      if (it.ex === exId && it.sets.some((s) => s.done)) return { date: w.date, sets: it.sets.filter((s) => s.done), rir: it.rir, w };
+      if (it.ex === exId && it.sets.some((s) => s.done)) return { date: w.date, sets: it.sets.filter((s) => s.done), rir: it.rir, tooHeavy: !!it.tooHeavy, w };
     }
   }
   return null;
@@ -134,6 +139,40 @@ function recentLogs(state, exId, n) {
   return out;
 }
 
+/* ---------- weight suggestions ----------
+   Five anchor lifts (rough weight for 8 reps). Asked once; if skipped, a regular gym-goer is assumed (bodyweight multiples).
+   Every other weighted exercise is a ratio of one anchor (dumbbells / kettlebells: per hand). Epley converts to other rep counts. */
+const ANCHORS = [
+  { key: 'bench', name: 'Bench press', ex: 'EX013', bw: 0.75 },
+  { key: 'squat', name: 'Squat', ex: 'EX001', bw: 1.0 },
+  { key: 'deadlift', name: 'Deadlift', ex: 'EX008', bw: 1.25 },
+  { key: 'ohp', name: 'Overhead press', ex: 'EX018', bw: 0.5 },
+  { key: 'row', name: 'Barbell row', ex: 'EX021', bw: 0.7 },
+];
+const EST = {
+  EX001: ['squat', 1], EX002: ['squat', 0.8], EX003: ['squat', 0.3], EX004: ['squat', 1.8], EX005: ['squat', 0.22], EX006: ['squat', 0.22], EX007: ['squat', 0.18],
+  EX008: ['deadlift', 1], EX009: ['deadlift', 1.05], EX010: ['deadlift', 0.65], EX011: ['deadlift', 0.9], EX012: ['squat', 0.35],
+  EX013: ['bench', 1], EX014: ['bench', 0.36], EX015: ['bench', 0.82], EX016: ['bench', 0.9], EX018: ['ohp', 1], EX019: ['ohp', 0.36], EX020: ['ohp', 0.13],
+  EX021: ['row', 1], EX022: ['row', 0.45], EX023: ['row', 0.9], EX024: ['row', 0.3], EX025: ['row', 0.95], EX028: ['deadlift', 0.3],
+  EX031: ['row', 0.17], EX032: ['bench', 0.3], EX033: ['squat', 1], EX034: ['squat', 0.3], EX035: ['squat', 0.2], EX036: ['squat', 0.1], EX037: ['ohp', 0.3],
+  EX038: ['deadlift', 0.2], EX039: ['deadlift', 0.15], EX040: ['deadlift', 0.15], EX041: ['deadlift', 0.15], EX042: ['ohp', 0.35], EX043: ['ohp', 0.4],
+  EX044: ['bench', 0.3], EX045: ['row', 0.4], EX046: ['row', 0.35], EX047: ['deadlift', 0.2], EX048: ['ohp', 0.3], EX049: ['ohp', 0.25], EX051: ['deadlift', 0.12], EX052: ['deadlift', 0.25],
+};
+function anchorKg(state, key) {
+  const sw = (state.settings && state.settings.startWeights) || {};
+  if (Number(sw[key]) > 0) return Number(sw[key]);
+  const a = ANCHORS.find((x) => x.key === key);
+  return a.bw * (bodyweight(state) || 80);
+}
+function estimateKg(state, ex, reps) {
+  const e = EST[ex.id];
+  if (!e) return null;
+  const kg8 = anchorKg(state, e[0]) * e[1];
+  const kg = (kg8 * (1 + 8 / 30)) / (1 + ((Number(reps) || 8) + 2) / 30); // aim for 2 reps in reserve
+  const min = /Barbell|Trap bar/.test(ex.e) ? 20 : 2;
+  return Math.max(min, roundKg(kg, ex));
+}
+
 /* ---------- prescription: sets, reps, weight from the last session ---------- */
 function prescribe(state, ex, sets, role) {
   const r = parseReps(ex.x);
@@ -141,7 +180,9 @@ function prescribe(state, ex, sets, role) {
   const last = lastLog(state, ex.id);
   const lastKg = last ? Math.max(...last.sets.map((s) => Number(s.kg) || 0)) : 0;
   if (ex.w) {
-    if (last && lastKg > 0) {
+    if (last && lastKg > 0 && last.tooHeavy) {
+      item.kg = Math.min(...last.sets.map((s) => Number(s.kg) || lastKg)); item.target = r.lo; item.note = 'lighter';
+    } else if (last && lastKg > 0) {
       const kg = Math.max(...last.sets.map((s) => Number(s.kg) || 0));
       const atKg = last.sets.filter((s) => (Number(s.kg) || 0) === kg);
       const allTop = atKg.length >= Math.min(sets, last.sets.length) && atKg.every((s) => s.reps >= r.hi);
@@ -157,6 +198,8 @@ function prescribe(state, ex, sets, role) {
     } else {
       item.note = 'first';
       if (last) { const worst = Math.min(...last.sets.map((s) => Number(s.reps) || 0)); item.target = Math.min(r.hi, Math.max(r.lo, worst + 1)); }
+      item.kg = estimateKg(state, ex, item.target);
+      if (item.kg) item.note = 'estimate';
     }
   } else if (last) {
     const worst = Math.min(...last.sets.map((s) => Number(s.reps) || 0));
@@ -277,7 +320,7 @@ function generateStrength(state, opts) {
   const firstEx = blocks.length ? EX_BY_ID[blocks[0].items[0].ex] : null;
   const plan = {
     kind: mode === 'gym' ? 'gym' : 'cali', place: mode === 'home' ? 'home' : 'gym', mode, minutes,
-    warmup: warmup(mode, minutes, firstEx), blocks,
+    warmup: null, blocks, // Guido skips the warm-up (2026-11-24), so none is planned
     cardio: minutes >= 60 ? { minutes: 10, what: mode === 'home' ? 'walk' : 'bike' } : null,
   };
   fitToTime(state, plan, mode);
@@ -413,6 +456,12 @@ function applyProgress(state, w) {
     const prev = bestBefore(state, ex.id, w.id);
     const done = it.sets.filter((s) => s.done);
     if (!done.length) continue;
+    if (ex.w) {
+      const r = parseReps(ex.x);
+      const kg = Math.max(...done.map((s) => Number(s.kg) || 0));
+      if (it.tooHeavy) events.push({ k: 'lighter', ex: ex.id, kg: Math.min(...done.map((s) => Number(s.kg) || kg)) });
+      else if (kg > 0 && done.length >= 2 && done.every((s) => (Number(s.reps) || 0) >= r.hi)) events.push({ k: 'heavier', ex: ex.id, kg: roundKg(kg + kgStep(ex) * (it.rir != null && it.rir >= 3 ? 2 : 1), ex) });
+    }
     if (!prev) { events.push({ k: 'first', ex: ex.id }); continue; }
     if (ex.w) {
       const kg = Math.max(...done.map((s) => Number(s.kg) || 0));
@@ -445,6 +494,64 @@ function bestBefore(state, exId, wid) {
     }
   }
   return b;
+}
+
+function volume(w) {
+  let v = 0;
+  for (const it of w.items || []) for (const s of it.sets) if (s.done) v += (Number(s.kg) || 0) * (Number(s.reps) || 0) * (/Dumbbells|2 kettlebells/.test((EX_BY_ID[it.ex] || {}).e || '') ? 2 : 1);
+  return Math.round(v);
+}
+
+/* ---------- ranks + badges (competence-based: no coins, shop or leaderboards) ---------- */
+const RANKS = [[0, 'Rookie', '🥉'], [22, 'Athlete', '🥈'], [30, 'Strong', '🥇'], [40, 'Powerhouse', '💎'], [52, 'Beast', '🔥'], [66, 'Legend', '👑']];
+function rankFor(level) {
+  let i = 0; for (let j = 0; j < RANKS.length; j++) if (level >= RANKS[j][0]) i = j;
+  const cur = RANKS[i], next = RANKS[i + 1] || null;
+  return { name: cur[1], icon: cur[2], from: cur[0], next: next ? { at: next[0], name: next[1], icon: next[2] } : null };
+}
+function badgeStats(state) {
+  const ws = state.workouts;
+  const weeks = {};
+  for (const w of ws) { const k = weekKey(w.date); weeks[k] = weeks[k] || { s: 0, r: 0 }; if (w.kind === 'run') weeks[k].r++; else if (w.kind !== 'other') weeks[k].s++; }
+  let sets = 0, prs = 0, levelups = 0, maxVol = 0;
+  for (const w of ws) {
+    for (const it of w.items || []) sets += it.sets.filter((s) => s.done).length;
+    for (const e of w.events || []) { if (e.k === 'pr') prs++; if (e.k === 'levelup' || e.k === 'mastered') levelups++; }
+    maxVol = Math.max(maxVol, volume(w));
+  }
+  const hour = (w) => (w.start ? new Date(w.start).getHours() : 12);
+  return {
+    n: ws.length, strength: ws.filter((w) => w.kind === 'gym' || w.kind === 'cali').length, runs: ws.filter((w) => w.kind === 'run').length,
+    sets, prs, levelups, maxVol, early: ws.some((w) => w.start && hour(w) < 8), late: ws.some((w) => w.start && hour(w) >= 21),
+    home: ws.some((w) => w.place === 'home'), allround: Object.values(weeks).some((x) => x.s >= 1 && x.r >= 1),
+    streak: streak(state, new Date()).weeks, run30: runLevel(state) >= 2,
+  };
+}
+const BADGES = [
+  { id: 'first', icon: '🎬', name: 'First workout', need: 'Finish 1 workout', ok: (x) => x.n >= 1 },
+  { id: 'ten', icon: '🔟', name: 'Ten down', need: 'Finish 10 workouts', ok: (x) => x.n >= 10 },
+  { id: 'fifty', icon: '🏅', name: 'Regular', need: 'Finish 50 workouts', ok: (x) => x.n >= 50 },
+  { id: 'hundred', icon: '💯', name: 'Centurion', need: 'Finish 100 workouts', ok: (x) => x.n >= 100 },
+  { id: 'streak4', icon: '🔥', name: 'On fire', need: 'Reach your week goal 4 weeks in a row', ok: (x) => x.streak >= 4 },
+  { id: 'streak12', icon: '☄️', name: 'Unstoppable', need: 'Reach your week goal 12 weeks in a row', ok: (x) => x.streak >= 12 },
+  { id: 'levelup', icon: '⬆️', name: 'Level up', need: 'Pass your first level-up test', ok: (x) => x.levelups >= 1 },
+  { id: 'levelup10', icon: '🪜', name: 'Climber', need: 'Pass 10 level-up tests', ok: (x) => x.levelups >= 10 },
+  { id: 'pr', icon: '⭐', name: 'Record breaker', need: 'Set 10 personal records', ok: (x) => x.prs >= 10 },
+  { id: 'ton', icon: '🏋️', name: 'One tonne', need: 'Lift 1,000 kg in one workout', ok: (x) => x.maxVol >= 1000 },
+  { id: 'five', icon: '🚛', name: 'Five tonnes', need: 'Lift 5,000 kg in one workout', ok: (x) => x.maxVol >= 5000 },
+  { id: 'sets500', icon: '🧱', name: 'Brick by brick', need: 'Tick off 500 sets', ok: (x) => x.sets >= 500 },
+  { id: 'run30', icon: '🏃', name: '30 minutes non-stop', need: 'Run 30 minutes without walking', ok: (x) => x.run30 },
+  { id: 'allround', icon: '🔀', name: 'All-rounder', need: 'Strength and a run in the same week', ok: (x) => x.allround },
+  { id: 'home', icon: '🏠', name: 'Home gym', need: 'Finish a home workout', ok: (x) => x.home },
+  { id: 'early', icon: '🌅', name: 'Early bird', need: 'Start a workout before 8:00', ok: (x) => x.early },
+  { id: 'late', icon: '🦉', name: 'Night owl', need: 'Start a workout after 21:00', ok: (x) => x.late },
+];
+// Marks newly earned badges with today's date and returns them.
+function checkBadges(state, date) {
+  state.badges = state.badges || {};
+  const x = badgeStats(state), fresh = [];
+  for (const b of BADGES) if (!state.badges[b.id] && b.ok(x)) { state.badges[b.id] = date; fresh.push(b.id); }
+  return fresh;
 }
 
 /* ---------- weight tiers + character level ---------- */
@@ -498,4 +605,4 @@ function streak(state, today) {
   return { weeks: n, tokensUsed: tokens, thisWeek: now };
 }
 
-if (typeof module !== 'undefined') module.exports = { generateStrength, generateRun, applyProgress, parseReps, parseTest, characterLevel, streak, weekResult, tierFor, TIERS, estimate, exerciseFor, LADDERS, SKILL_LADDERS, EX_BY_ID, dayKey, weekKey, ladderExercises, maxLevel, runLevel, ladderLevel, lastLog, bodyweight, longestRun };
+if (typeof module !== 'undefined') module.exports = { volume, rankFor, checkBadges, BADGES, estimateKg, ANCHORS, anchorKg, generateStrength, generateRun, applyProgress, parseReps, parseTest, characterLevel, streak, weekResult, tierFor, TIERS, estimate, exerciseFor, LADDERS, SKILL_LADDERS, EX_BY_ID, dayKey, weekKey, ladderExercises, maxLevel, runLevel, ladderLevel, lastLog, bodyweight, longestRun };

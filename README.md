@@ -41,7 +41,7 @@ Plain HTML/CSS/JS: `index.html`, `styles.css`, `i18n.js` (Dutch default), `exerc
 Free Exercise DB, public domain), `engine.js` (generator + progression, no DOM), `app.js` (screens), `sw.js`, `manifest.webmanifest`.
 When changing files, bump `CACHE` in `sport/sw.js` and `APP_VERSION` in `sport/app.js`.
 
-- Generator: gym / bodyweight (gym or home without equipment) / run, 15–60 min. RAMP warm-up, patterns by least recently trained,
+- Generator: gym / bodyweight (gym or home without equipment) / run, 15–60 min. No warm-up (Guido's choice). Patterns by least recently trained,
   always push + pull + legs, antagonist supersets, main lift from 30 min, extra superset + core from 45, cardio at 60. Trimmed to time.
 - Progression from the last session: top of the rep range on every set → heavier (double step if RIR ≥ 3); 3 sessions short → −10%.
 - Skill ladders (`l`/`lv` in exercises.js) level up when the exercise's test is passed in a workout; level can be set by hand.
@@ -51,3 +51,7 @@ When changing files, bump `CACHE` in `sport/sw.js` and `APP_VERSION` in `sport/a
 - Weekly goal (default 2 strength + 1 run); a week one session short is saved by the rest token.
 - Data: `sport-app-state` (IndexedDB + localStorage). After a workout the app writes the date to localStorage `dagtracker-sport-inbox`;
   Dagtracker turns "sport" on for those days when it opens (setting can be turned off in Training).
+- Weights (v2): five anchor lifts (8-rep weight) asked once before the first gym workout, or guessed from bodyweight for a regular
+  gym-goer. Other weighted exercises are ratios of an anchor (`EST` in engine.js), aimed at 2 reps in reserve. "Too heavy" lowers the
+  remaining sets 10% and the next workout starts there. Gym ladders start at the barbell lifts (`DEFAULT_LEVELS`).
+- Gamification (v2): ranks from character level, 17 badges (`BADGES`), celebration screen with kg lifted. No coins, shop or leaderboards.

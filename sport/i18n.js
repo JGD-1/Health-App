@@ -108,6 +108,29 @@ const NL = {
   'Gymnastic rings': 'Turnringen', 'Bench or box': 'Bank of kist', 'Door frame or pole': 'Deurpost of paal', 'Anchor for feet': 'Iets om je voeten onder te haken',
   'Bar or parallel bars': 'Stang of brugleggers', 'Parallel bars or floor': 'Brugleggers of vloer', 'Wall': 'Muur', 'Open floor / soft surface': 'Vrije ruimte, zachte ondergrond',
   'Jump rope': 'Springtouw', 'Band': 'Elastiek',
+  // v2: ranks, badges, weights
+  'Rank': 'Rang', 'Rookie': 'Rookie', 'Athlete': 'Sporter', 'Strong': 'Atleet', 'Powerhouse': 'Krachtpatser', 'Beast': 'Beest', 'Legend': 'Legende',
+  '{n} levels to {rank}': 'Nog {n} levels tot {rank}', 'Highest rank!': 'Hoogste rang!', '{n} weeks in a row': '{n} weken op rij',
+  'Your weights, roughly': 'Je gewichten, ongeveer', 'Just guess': 'Schat maar', 'Your weights': 'Je gewichten', 'Change': 'Aanpassen',
+  'What could you lift about 8 times? Fill in what you know; the grey numbers are a guess for a regular gym-goer of {kg} kg. The app suggests all other weights from these and adjusts after every workout.':
+    'Wat kun je ongeveer 8 keer tillen? Vul in wat je weet; de grijze getallen zijn een schatting voor een vaste sportschoolganger van {kg} kg. De app rekent hiermee alle andere gewichten uit en past ze na elke training aan.',
+  '* = estimate. Used only for exercises you haven’t logged yet; after that, your own sets count.': '* = schatting. Alleen gebruikt voor oefeningen die je nog niet gelogd hebt; daarna tellen je eigen sets.',
+  'Lowered. Next time you start at this weight.': 'Verlaagd. Volgende keer begin je op dit gewicht.',
+  'Suggested weight. Too heavy? Tap “Too heavy”.': 'Voorgesteld gewicht. Te zwaar? Tik op “Te zwaar”.',
+  'Lighter after last time, build up from here': 'Lichter na vorige keer, vanaf hier weer opbouwen',
+  'Too heavy': 'Te zwaar', 'Lowered to {kg} kg': 'Verlaagd naar {kg} kg',
+  'New rank: {rank}!': 'Nieuwe rang: {rank}!', '{ex}: next time {kg} kg': '{ex}: volgende keer {kg} kg',
+  'Huge!': 'Knap gedaan!', 'minutes': 'minuten', 'kg lifted': 'kg getild', 'sets': 'sets', 'Badge unlocked': 'Badge verdiend', 'Badges': 'Badges',
+  'Character level: the sum of all your skill levels. A level goes up when you pass its test in a workout.': 'Karakterlevel: de som van al je skill-levels. Een level gaat omhoog als je de test haalt tijdens een training.',
+  'First workout': 'Eerste training', 'Finish 1 workout': 'Rond 1 training af', 'Ten down': 'Tien gedaan', 'Finish 10 workouts': 'Rond 10 trainingen af',
+  'Regular': 'Vaste klant', 'Finish 50 workouts': 'Rond 50 trainingen af', 'Centurion': 'Honderdklapper', 'Finish 100 workouts': 'Rond 100 trainingen af',
+  'On fire': 'On fire', 'Reach your week goal 4 weeks in a row': 'Haal je weekdoel 4 weken op rij', 'Unstoppable': 'Niet te stoppen', 'Reach your week goal 12 weeks in a row': 'Haal je weekdoel 12 weken op rij',
+  'Level up': 'Level up', 'Pass your first level-up test': 'Haal je eerste level-up test', 'Climber': 'Klimmer', 'Pass 10 level-up tests': 'Haal 10 level-up tests',
+  'Record breaker': 'Recordbreker', 'Set 10 personal records': 'Zet 10 persoonlijke records', 'One tonne': 'Eén ton', 'Lift 1,000 kg in one workout': 'Til 1.000 kg in één training',
+  'Five tonnes': 'Vijf ton', 'Lift 5,000 kg in one workout': 'Til 5.000 kg in één training', 'Brick by brick': 'Steen voor steen', 'Tick off 500 sets': 'Vink 500 sets af',
+  '30 minutes non-stop': '30 minuten non-stop', 'All-rounder': 'Allrounder', 'Strength and a run in the same week': 'Kracht en hardlopen in dezelfde week',
+  'Home gym': 'Thuisgym', 'Finish a home workout': 'Rond een thuistraining af', 'Early bird': 'Vroege vogel', 'Start a workout before 8:00': 'Start een training voor 8:00',
+  'Night owl': 'Nachtuil', 'Start a workout after 21:00': 'Start een training na 21:00',
 };
 
 function lang() {

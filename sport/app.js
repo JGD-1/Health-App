@@ -2,7 +2,7 @@
    and levels up skills. Data lives on the phone (IndexedDB + localStorage mirror). */
 'use strict';
 
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '2.0.0';
 const SCHEMA = 1;
 const TRACKER_LS = 'daily-log-state'; // Dagtracker's data (same web address, so readable here)
 const TRACKER_INBOX = 'dagtracker-sport-inbox'; // days the tracker should mark as "sport: yes"
@@ -195,6 +195,7 @@ function renderTrain() {
       el('div', {}, el('b', {}, tr('Workout in progress')), el('div', { class: 'muted small' }, planTitle(state.active.plan))),
       el('button', { class: 'btn primary', onclick: () => setView('workout') }, tr('Continue'))));
   }
+  root.append(heroCard());
   root.append(weekCard());
   // generator
   const s = state.settings;
@@ -205,10 +206,11 @@ function renderTrain() {
     el('div', { class: 'lbl' }, tr('Where are you?')),
     seg([['gym', '🏋️ ' + tr('Gym')], ['home', '🏠 ' + tr('Home, no equipment')]], s.place, (v) => { s.place = v; save(); render(); }),
     el('div', { class: 'lbl' }, tr('What do you want to do?')),
-    seg(types.map(([v, l]) => [v, tr(l)]), s.type, (v) => { s.type = v; save(); render(); }),
+    el('div', { class: 'types n' + types.length }, types.map(([v, l]) => el('button', { class: 'type' + (s.type === v ? ' on' : ''), onclick: () => { s.type = v; save(); render(); } },
+      el('span', { class: 'type-ic' }, { gym: '🏋️', cali: '🤸', run: '🏃' }[v]), el('span', {}, tr(l))))),
     el('div', { class: 'lbl' }, tr('How much time do you have?')),
     el('div', { class: 'chips' }, TIMES.map((m) => el('button', { class: 'chip' + (s.minutes === m ? ' on' : ''), onclick: () => { s.minutes = m; save(); render(); } }, `${m} min`))),
-    el('button', { class: 'btn primary wide big', onclick: makeWorkout }, tr('Make my workout')),
+    el('button', { class: 'btn primary wide big go', onclick: makeWorkout }, tr('Make my workout') + ' →'),
     s.place === 'home' && s.type !== 'run' ? el('p', { class: 'muted small' }, tr('At home without equipment, pulling is done as a row under a sturdy table.')) : null,
   );
   root.append(gen);
@@ -237,6 +239,19 @@ function ring(value, goal, label, sub) {
       el('div', { class: 'ring-n' }, value >= goal && goal ? '✓' : `${value}/${goal}`)),
     el('div', { class: 'ring-l' }, label), sub ? el('div', { class: 'ring-s' }, sub) : null);
 }
+function heroCard() {
+  const lvl = characterLevel(state), rk = rankFor(lvl);
+  const pct = rk.next ? Math.round(100 * (lvl - rk.from) / (rk.next.at - rk.from)) : 100;
+  const st = streak(state, new Date());
+  return el('button', { class: 'card hero2', onclick: () => setView('skills') },
+    el('div', { class: 'h2-top' },
+      el('div', { class: 'h2-rank' }, el('span', { class: 'h2-ic' }, rk.icon), el('div', {}, el('small', {}, tr('Rank')), el('b', {}, tr(rk.name)))),
+      el('div', { class: 'h2-lvl' }, el('small', {}, 'LVL'), el('b', {}, lvl))),
+    el('div', { class: 'xp' }, el('div', { style: `width:${pct}%` })),
+    el('div', { class: 'h2-sub' },
+      el('span', {}, rk.next ? tr('{n} levels to {rank}', { n: rk.next.at - lvl, rank: tr(rk.next.name) }) : tr('Highest rank!')),
+      el('span', { class: 'flame' + (st.weeks ? ' on' : '') }, `🔥 ${st.weeks}`)));
+}
 function weekCard() {
   const st = streak(state, new Date());
   const w = st.thisWeek, g = state.settings.goals;
@@ -246,7 +261,7 @@ function weekCard() {
   else if (w.short === 1) tokenLine = tr('One session to go. If it doesn’t happen, your rest token saves the streak.');
   else tokenLine = tr('{n} sessions to go, {d} days left.', { n: w.short, d: daysLeft + 1 });
   return el('div', { class: 'card' },
-    el('div', { class: 'card-head' }, el('h2', {}, tr('This week')), el('span', { class: 'streak' + (st.weeks ? ' on' : '') }, `🔥 ${tr('{n} wk', { n: st.weeks })}`)),
+    el('div', { class: 'card-head' }, el('h2', {}, tr('This week')), el('span', { class: 'streak' + (st.weeks ? ' on' : '') }, tr('{n} weeks in a row', { n: st.weeks }))),
     el('div', { class: 'rings' },
       ring(w.strength, g.strength, tr('Strength')),
       ring(w.runs, g.runs, tr('Running')),
@@ -256,11 +271,37 @@ function weekCard() {
 
 function makeWorkout() {
   const s = state.settings;
+  if (s.type === 'gym' && !s.startWeightsAsked) return openStartWeights(makeWorkout);
   let plan;
   if (s.type === 'run') plan = generateRun(state, { minutes: s.minutes });
   else plan = generateStrength(state, { mode: s.type === 'gym' ? 'gym' : s.place === 'home' ? 'home' : 'cali', minutes: s.minutes });
   state.active = { id: uid(), plan, created: new Date().toISOString(), started: null, rest: null, run: null };
   save(); setView('workout');
+}
+
+// Rough 8-rep weights for five lifts. Everything else is suggested from these.
+function openStartWeights(then) {
+  const s = state.settings;
+  const bw = bodyweight(state) || 80;
+  const inputs = {};
+  const rows = ANCHORS.map((a) => {
+    const guess = Math.round(anchorKg(state, a.key) / 2.5) * 2.5;
+    const i = el('input', { type: 'number', inputmode: 'decimal', placeholder: fmtKg(guess), value: (s.startWeights && s.startWeights[a.key]) || '' });
+    inputs[a.key] = i;
+    return el('div', { class: 'sw-row' }, el('span', {}, tr(a.name)), el('label', { class: 'sw-in' }, i, el('small', {}, 'kg')));
+  });
+  const done = (useInputs) => {
+    s.startWeights = {};
+    if (useInputs) for (const a of ANCHORS) { const v = Number(String(inputs[a.key].value).replace(',', '.')); if (v > 0) s.startWeights[a.key] = v; }
+    s.startWeightsAsked = true; save(); closeSheet(); if (then) then(); else render();
+  };
+  openSheet(el('div', {},
+    el('h3', {}, tr('Your weights, roughly')),
+    el('p', { class: 'muted small' }, tr('What could you lift about 8 times? Fill in what you know; the grey numbers are a guess for a regular gym-goer of {kg} kg. The app suggests all other weights from these and adjusts after every workout.', { kg: fmtKg(bw) })),
+    rows,
+    el('div', { class: 'sheet-actions' },
+      el('button', { class: 'btn', onclick: () => done(false) }, tr('Just guess')),
+      el('button', { class: 'btn primary', onclick: () => done(true) }, tr('Save')))));
 }
 
 /* ---------- Workout (preview + doing it) ---------- */
@@ -275,12 +316,6 @@ function renderWorkout() {
   root.append(el('div', { class: 'card plan-head' },
     el('div', {}, el('b', {}, planTitle(p)), el('div', { class: 'muted small' }, tr('About {n} min', { n: p.estimate }) + (a.started ? ' · ' + tr('started {t}', { t: new Date(a.started).toLocaleTimeString(LOC(), { hour: '2-digit', minute: '2-digit' }) }) : ''))),
     a.started ? el('div', { class: 'clock', id: 'clock' }, '0:00') : el('button', { class: 'btn primary', onclick: () => { a.started = new Date().toISOString(); save(); keepAwake(true); render(); } }, tr('Start'))));
-  // warm-up
-  const wu = p.warmup;
-  root.append(el('div', { class: 'card' },
-    el('div', { class: 'card-head' }, el('h2', {}, tr('Warm-up')), el('span', { class: 'muted' }, `${wu.minutes} min`)),
-    el('div', { class: 'wu' }, wu.steps.map((st) => { const ex = EX_BY_ID[st.ex]; return el('button', { class: 'wu-i', onclick: () => openExercise(ex) }, photo(ex, 'sm'), el('span', {}, exName(ex)), el('small', {}, st.dose.replace('min', 'min'))); })),
-    wu.ramp ? el('p', { class: 'muted small' }, tr('Then 1–2 light warm-up sets of your first exercise.')) : null));
   p.blocks.forEach((b, bi) => root.append(blockCard(a, b, bi)));
   if (p.cardio) root.append(el('div', { class: 'card' }, el('div', { class: 'card-head' }, el('h2', {}, tr('Cardio')), el('span', { class: 'muted' }, `${p.cardio.minutes} min`)),
     el('p', { class: 'small' }, p.cardio.what === 'walk' ? tr('Brisk walk or easy jog. You should still be able to talk.') : tr('Bike, rower or treadmill at an easy, steady pace.'))));
@@ -323,7 +358,7 @@ function itemView(a, b, it, label, bi, ii) {
   const ex = EX_BY_ID[it.ex];
   const r = parseReps(ex.x);
   const timed = r.unit === 's';
-  const note = { up: tr('Heavier than last time 💪'), deload: tr('A bit lighter to reset, then build up again'), first: tr('First time: pick a weight you could lift 2–3 more times'), top: tr('Top of the range: try the level-up test') }[it.note];
+  const note = it.tooHeavy ? tr('Lowered. Next time you start at this weight.') : { up: tr('Heavier than last time 💪'), deload: tr('A bit lighter to reset, then build up again'), first: tr('First time: pick a weight you could lift 2–3 more times'), estimate: tr('Suggested weight. Too heavy? Tap “Too heavy”.'), lighter: tr('Lighter after last time, build up from here'), top: tr('Top of the range: try the level-up test') }[it.note];
   const rows = it.sets.map((s, si) => {
     const done = s.done;
     const repsBox = stepper(s.reps, timed ? 5 : 1, (v) => { s.reps = v; save(); }, timed ? 's' : tr('reps'));
@@ -342,9 +377,18 @@ function itemView(a, b, it, label, bi, ii) {
         el('b', {}, exName(ex)),
         el('span', { class: 'rx' }, `${it.sets.length} × ${repsText(ex, it)}${it.kg ? ` · ${fmtKg(it.kg)} kg` : ''}`),
         ex.l ? el('span', { class: 'muted small' }, `${ladderName(ex.l)} · ${tr('level {n}', { n: ex.lv })}`) : null)),
-    note ? el('p', { class: 'note' }, note) : null,
+    note ? el('p', { class: 'note' + (it.note === 'up' && !it.tooHeavy ? ' up' : '') }, note) : null,
     el('div', { class: 'sets' }, rows),
+    ex.w && !allDone ? el('button', { class: 'heavy', onclick: () => tooHeavy(ex, it) }, '↓ ' + tr('Too heavy')) : null,
     allDone ? rirRow(it) : null);
+}
+// "I can't make it": 10% lighter for the sets still to do; next workout starts there.
+function tooHeavy(ex, it) {
+  let to = null;
+  for (const st of it.sets) if (!st.done) { const base = Number(st.kg) || Number(it.kg) || 0; if (base) { st.kg = Math.max(0, roundKg(base * 0.9, ex)); to = st.kg; } }
+  if (to != null) it.kg = to;
+  it.tooHeavy = true; save(); renderKeepScroll();
+  if (to != null) toast(tr('Lowered to {kg} kg', { kg: fmtKg(to) }));
 }
 function fmtKg(v) { return String(Math.round(v * 10) / 10).replace('.', lang() === 'nl' ? ',' : '.'); }
 function stepper(value, step, onchange, unit, isKg) {
@@ -446,12 +490,17 @@ function finish(effort, minutes, km) {
     w.completed = !!(a.run && a.run.finished);
     w.patterns = [];
   } else {
-    w.items = p.blocks.flatMap((b) => b.items).map((it) => ({ ex: it.ex, sets: it.sets.map((s) => ({ reps: s.reps, kg: s.kg, done: !!s.done })), rir: it.rir ?? null }));
+    w.items = p.blocks.flatMap((b) => b.items).map((it) => ({ ex: it.ex, sets: it.sets.map((s) => ({ reps: s.reps, kg: s.kg, done: !!s.done })), rir: it.rir ?? null, tooHeavy: !!it.tooHeavy }));
     w.patterns = [...new Set(p.blocks.filter((b) => b.items.some((it) => it.sets.some((s) => s.done))).flatMap((b) => b.patterns))];
   }
+  const before = characterLevel(state);
   state.workouts.push(w);
   state.workouts.sort((x, y) => (x.date + (x.end || '')).localeCompare(y.date + (y.end || '')));
   w.events = applyProgress(state, w);
+  const after = characterLevel(state);
+  if (rankFor(after).name !== rankFor(before).name) w.events.unshift({ k: 'rank', name: rankFor(after).name, icon: rankFor(after).icon });
+  w.volume = volume(w);
+  w.badges = checkBadges(state, w.date);
   state.active = null;
   save(true); keepAwake(false);
   markTrackerSport(date);
@@ -469,17 +518,36 @@ function showSummary(w) {
     if (e.k === 'pr') return el('li', { class: 'ev' }, '⭐ ', tr('New record: {ex}', { ex: exName(EX_BY_ID[e.ex]) }) + (e.kg ? ` (${fmtKg(e.kg)} kg)` : e.reps ? ` (${e.reps})` : ''));
     if (e.k === 'first') return el('li', { class: 'ev' }, '✨ ', tr('First time: {ex}', { ex: exName(EX_BY_ID[e.ex]) }));
     if (e.k === 'runlevel') return el('li', { class: 'ev big' }, '🏃 ', tr('Running level {n} unlocked!', { n: e.to }));
+    if (e.k === 'rank') return el('li', { class: 'ev big gold' }, e.icon + ' ', tr('New rank: {rank}!', { rank: tr(e.name) }));
+    if (e.k === 'heavier') return el('li', { class: 'ev up' }, '⬆ ', tr('{ex}: next time {kg} kg', { ex: exName(EX_BY_ID[e.ex]), kg: fmtKg(e.kg) }));
+    if (e.k === 'lighter') return el('li', { class: 'ev' }, '↓ ', tr('{ex}: next time {kg} kg', { ex: exName(EX_BY_ID[e.ex]), kg: fmtKg(e.kg) }));
     return null;
   }).filter(Boolean);
   const wk = weekResult(state, weekKey(w.date));
+  const badges = (w.badges || []).map((id) => BADGES.find((b) => b.id === id)).filter(Boolean);
+  const big = list.some((e) => ['levelup', 'mastered', 'rank', 'runlevel'].includes(e.k)) || badges.length;
   openSheet(el('div', { class: 'summary' },
-    el('div', { class: 'confetti' }, '🎉'),
-    el('h3', {}, tr('Well done!')),
-    el('p', { class: 'muted' }, `${kindLabel(w)} · ${w.minutes} min`),
+    burst(big),
+    el('h3', { class: 'sum-title' }, big ? tr('Huge!') : tr('Well done!')),
+    el('div', { class: 'sum-stats' },
+      el('div', {}, el('b', {}, w.minutes), el('small', {}, tr('minutes'))),
+      w.volume ? el('div', {}, el('b', {}, w.volume.toLocaleString(LOC())), el('small', {}, tr('kg lifted'))) : null,
+      w.items ? el('div', {}, el('b', {}, w.items.reduce((n, it) => n + it.sets.filter((x) => x.done).length, 0)), el('small', {}, tr('sets'))) : null),
+    badges.length ? el('div', { class: 'newbadges' }, badges.map((b) => el('div', { class: 'badge got pop' }, el('span', { class: 'b-ic' }, b.icon), el('b', {}, tr(b.name)), el('small', {}, tr('Badge unlocked'))))) : null,
     evs.length ? el('ul', { class: 'evs' }, evs) : null,
     el('p', {}, wk.met ? tr('Week goal reached!') : tr('This week: {s} of {gs} strength, {r} of {gr} runs.', { s: wk.strength, gs: state.settings.goals.strength, r: wk.runs, gr: state.settings.goals.runs })),
     state.settings.tracker ? el('p', { class: 'muted small' }, tr('Dagtracker will show this day as “sport: yes”.')) : null,
     el('button', { class: 'btn primary wide', onclick: closeSheet }, tr('Done'))));
+}
+function burst(big) {
+  const wrap = el('div', { class: 'burst' + (big ? ' big' : '') }, el('div', { class: 'burst-ic' }, big ? '🏆' : '💪'));
+  const colors = ['#8f7cff', '#ff5ca8', '#3ddc84', '#ffd23f', '#4cc9f0'];
+  for (let i = 0; i < (big ? 36 : 18); i++) {
+    const a = (i / (big ? 36 : 18)) * Math.PI * 2, d = 70 + Math.random() * 70;
+    wrap.append(el('i', { style: `--x:${Math.cos(a) * d}px;--y:${Math.sin(a) * d}px;background:${colors[i % colors.length]};animation-delay:${Math.random() * 0.15}s` }));
+  }
+  vibrate(big ? [80, 60, 80, 60, 200] : 60);
+  return wrap;
 }
 function openDiscardSheet() {
   openSheet(el('div', {}, el('h3', {}, tr('Stop without saving?')), el('p', { class: 'muted' }, tr('This workout will not be logged.')),
@@ -632,9 +700,15 @@ function openLogItem(w) {
 /* ---------- Skills ---------- */
 function renderSkills() {
   const root = $('#view-skills'); root.innerHTML = '';
+  const lvl = characterLevel(state), rk = rankFor(lvl);
   root.append(el('div', { class: 'card hero' },
-    el('div', { class: 'hero-n' }, characterLevel(state)),
-    el('div', {}, el('b', {}, tr('Character level')), el('p', { class: 'muted small' }, tr('The sum of all your skill levels. A level goes up when you pass its test in a workout.')))));
+    el('div', { class: 'hero-n' }, lvl),
+    el('div', {}, el('b', {}, `${rk.icon} ${tr(rk.name)}`), el('p', { class: 'muted small' }, tr('Character level: the sum of all your skill levels. A level goes up when you pass its test in a workout.')),
+      rk.next ? el('p', { class: 'small' }, tr('{n} levels to {rank}', { n: rk.next.at - lvl, rank: `${rk.next.icon} ${tr(rk.next.name)}` })) : null)));
+  const got = state.badges || {};
+  root.append(el('h2', { class: 'sec' }, tr('Badges'), el('span', { class: 'muted small' }, ` ${Object.keys(got).length}/${BADGES.length}`)));
+  root.append(el('div', { class: 'badges' }, BADGES.map((b) => el('button', { class: 'badge' + (got[b.id] ? ' got' : ''), onclick: () => toast(got[b.id] ? `${tr(b.name)} · ${fmtDate(got[b.id])}` : tr(b.need)) },
+    el('span', { class: 'b-ic' }, got[b.id] ? b.icon : '🔒'), el('b', {}, tr(b.name))))));
   const sec = (title, ladders, mode) => {
     root.append(el('h2', { class: 'sec' }, title));
     for (const l of ladders) root.append(ladderCard(l, mode));
@@ -703,6 +777,11 @@ function renderSettings() {
     el('div', { class: 'goal' }, el('span', {}, tr('Strength workouts')), num(s.goals.strength, 1, 0, 7, (v) => { s.goals.strength = v; save(); })),
     el('div', { class: 'goal' }, el('span', {}, tr('Runs')), num(s.goals.runs, 1, 0, 7, (v) => { s.goals.runs = v; save(); })),
     el('p', { class: 'muted small' }, tr('Dutch guideline: at least 150 minutes of moderate exercise a week, with muscle-strengthening at least twice. One rest token per week covers one missed session.'))));
+  const sw = s.startWeights || {};
+  root.append(el('div', { class: 'card' }, el('h2', {}, tr('Your weights')),
+    el('p', { class: 'muted small' }, ANCHORS.map((a) => `${tr(a.name)} ${fmtKg(Math.round(anchorKg(state, a.key) / 2.5) * 2.5)} kg${sw[a.key] ? '' : '*'}`).join(' · ')),
+    el('p', { class: 'muted small' }, tr('* = estimate. Used only for exercises you haven’t logged yet; after that, your own sets count.')),
+    el('button', { class: 'btn wide', onclick: () => openStartWeights(null) }, tr('Change'))));
   const bwIn = el('input', { type: 'number', inputmode: 'decimal', value: s.bodyweight ?? '', placeholder: state.trackerWeight ? fmtKg(state.trackerWeight) : 'kg' });
   bwIn.onchange = () => { s.bodyweight = bwIn.value ? Number(String(bwIn.value).replace(',', '.')) : null; save(); };
   root.append(el('div', { class: 'card' }, el('h2', {}, tr('About you')),
