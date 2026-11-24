@@ -16,7 +16,7 @@ const RANK_ORDER = ['squat', 'hpush', 'hpull', 'hinge', 'vpull', 'vpush', 'lunge
 const LADDERS = {
   gym: { squat: 'Squat (gym)', lunge: 'Lunge (gym)', hinge: 'Hinge (gym)', hpush: 'Push (gym)', vpush: 'Overhead (gym)', hpull: 'Row (gym)', vpull: 'Vertical pull (gym)', core: 'Core' },
   cali: { squat: 'Single-leg squat', hinge: 'Hinge (bodyweight)', hpush: ['Push-up', 'Dip'], vpush: 'Handstand', hpull: '#EX062', vpull: 'Pull-up', core: 'Core' },
-  home: { squat: 'Single-leg squat', hinge: 'Hinge (bodyweight)', hpush: 'Push-up', vpush: 'Handstand', hpull: '#EX062', core: 'Core' },
+  home: { squat: 'Single-leg squat', hinge: 'Hinge (bodyweight)', hpush: 'Push-up', vpush: 'Handstand', core: 'Core' }, // no pull at home: no equipment (Guido, 2026-11-24)
 };
 // Ladders shown on the Skills screen
 const SKILL_LADDERS = {
