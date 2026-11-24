@@ -2,7 +2,7 @@
    and levels up skills. Data lives on the phone (IndexedDB + localStorage mirror). */
 'use strict';
 
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.0';
 const SCHEMA = 1;
 const TRACKER_LS = 'daily-log-state'; // Dagtracker's data (same web address, so readable here)
 const TRACKER_INBOX = 'dagtracker-sport-inbox'; // days the tracker should mark as "sport: yes"
@@ -209,7 +209,7 @@ function renderTrain() {
     el('div', { class: 'lbl' }, tr('How much time do you have?')),
     el('div', { class: 'chips' }, TIMES.map((m) => el('button', { class: 'chip' + (s.minutes === m ? ' on' : ''), onclick: () => { s.minutes = m; save(); render(); } }, `${m} min`))),
     el('button', { class: 'btn primary wide big', onclick: makeWorkout }, tr('Make my workout')),
-    s.place === 'home' && s.type !== 'run' ? el('p', { class: 'muted small' }, tr('At home there is no pulling exercise (no equipment). Your gym workouts cover that.')) : null,
+    s.place === 'home' && s.type !== 'run' ? el('p', { class: 'muted small' }, tr('At home without equipment, pulling is done as a row under a sturdy table.')) : null,
   );
   root.append(gen);
   root.append(el('button', { class: 'btn wide ghost', onclick: openOtherSheet }, '＋ ' + tr('Log another sport')));

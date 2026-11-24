@@ -14,7 +14,7 @@ const NL = {
   'Workout in progress': 'Training bezig', 'New workout': 'Nieuwe training', 'Where are you?': 'Waar ben je?',
   'Gym': 'Gym', 'Home': 'Thuis', 'Home, no equipment': 'Thuis', 'Bodyweight': 'Eigen gewicht', 'Run': 'Hardlopen',
   'What do you want to do?': 'Wat wil je doen?', 'How much time do you have?': 'Hoeveel tijd heb je?', 'Make my workout': 'Maak mijn training',
-  'At home there is no pulling exercise (no equipment). Your gym workouts cover that.': 'Thuis zit er geen trekoefening in (geen spullen). Die doe je in de gym.',
+  'At home without equipment, pulling is done as a row under a sturdy table.': 'Thuis zonder spullen doe je de trekoefening als roeien onder een stevige tafel.',
   'Log another sport': 'Andere sport loggen', 'Last workout: {what}, {when}': 'Laatste training: {what}, {when}',
   'Run-walk': 'Hardlopen-wandelen', 'Easy run': 'Rustige duurloop', 'Intervals': 'Intervallen', 'Long run': 'Lange duurloop',
   'Other sport': 'Andere sport', 'Home workout': 'Thuistraining',
