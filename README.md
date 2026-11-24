@@ -55,3 +55,4 @@ When changing files, bump `CACHE` in `sport/sw.js` and `APP_VERSION` in `sport/a
   gym-goer. Other weighted exercises are ratios of an anchor (`EST` in engine.js), aimed at 2 reps in reserve. "Too heavy" lowers the
   remaining sets 10% and the next workout starts there. Gym ladders start at the barbell lifts (`DEFAULT_LEVELS`).
 - Gamification (v2): ranks from character level, 17 badges (`BADGES`), celebration screen with kg lifted. No coins, shop or leaderboards.
+- Design (v3, "Neon + Data"): start screen is one week-goal ring (strength, runs, minutes), a thin rank bar, a stats row (volume this week, streak, badges) and a recovery list per muscle group (`recovery()` in engine.js: 48 h after strength, 24 h for legs after a run). Gym/home, type and time sit in one sheet behind three small buttons.

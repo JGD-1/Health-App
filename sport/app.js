@@ -2,7 +2,7 @@
    and levels up skills. Data lives on the phone (IndexedDB + localStorage mirror). */
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '3.0.0';
 const SCHEMA = 1;
 const TRACKER_LS = 'daily-log-state'; // Dagtracker's data (same web address, so readable here)
 const TRACKER_INBOX = 'dagtracker-sport-inbox'; // days the tracker should mark as "sport: yes"
@@ -195,25 +195,17 @@ function renderTrain() {
       el('div', {}, el('b', {}, tr('Workout in progress')), el('div', { class: 'muted small' }, planTitle(state.active.plan))),
       el('button', { class: 'btn primary', onclick: () => setView('workout') }, tr('Continue'))));
   }
-  root.append(heroCard());
-  root.append(weekCard());
-  // generator
+  root.append(dashboard());
   const s = state.settings;
-  const types = s.place === 'home' ? [['cali', 'Bodyweight'], ['run', 'Run']] : [['gym', 'Gym'], ['cali', 'Bodyweight'], ['run', 'Run']];
-  if (!types.some(([v]) => v === s.type)) s.type = types[0][0];
-  const gen = el('div', { class: 'card' },
-    el('h2', {}, tr('New workout')),
-    el('div', { class: 'lbl' }, tr('Where are you?')),
-    seg([['gym', '🏋️ ' + tr('Gym')], ['home', '🏠 ' + tr('Home, no equipment')]], s.place, (v) => { s.place = v; save(); render(); }),
-    el('div', { class: 'lbl' }, tr('What do you want to do?')),
-    el('div', { class: 'types n' + types.length }, types.map(([v, l]) => el('button', { class: 'type' + (s.type === v ? ' on' : ''), onclick: () => { s.type = v; save(); render(); } },
-      el('span', { class: 'type-ic' }, { gym: '🏋️', cali: '🤸', run: '🏃' }[v]), el('span', {}, tr(l))))),
-    el('div', { class: 'lbl' }, tr('How much time do you have?')),
-    el('div', { class: 'chips' }, TIMES.map((m) => el('button', { class: 'chip' + (s.minutes === m ? ' on' : ''), onclick: () => { s.minutes = m; save(); render(); } }, `${m} min`))),
-    el('button', { class: 'btn primary wide big go', onclick: makeWorkout }, tr('Make my workout') + ' →'),
-    s.place === 'home' && s.type !== 'run' ? el('p', { class: 'muted small' }, tr('At home without equipment, pulling is done as a row under a sturdy table.')) : null,
-  );
-  root.append(gen);
+  fixType();
+  const typeIc = { gym: '🏋️', cali: '🤸', run: '🏃' }[s.type];
+  const typeL = { gym: 'Strength', cali: 'Bodyweight', run: 'Run' }[s.type];
+  root.append(el('div', { class: 'pick' },
+    el('button', { onclick: openPickSheet }, s.place === 'home' ? '🏠 ' + tr('Home') : '📍 ' + tr('Gym')),
+    el('button', { onclick: openPickSheet }, typeIc + ' ' + tr(typeL)),
+    el('button', { onclick: openPickSheet }, '⏱ ', el('b', {}, s.minutes), ' min')));
+  root.append(el('button', { class: 'cta', onclick: makeWorkout }, el('b', {}, tr('Make my workout')), el('span', {}, `${s.minutes}:00 →`)));
+  if (s.place === 'home' && s.type !== 'run') root.append(el('p', { class: 'muted small center' }, tr('At home without equipment, pulling is done as a row under a sturdy table.')));
   root.append(el('button', { class: 'btn wide ghost', onclick: openOtherSheet }, '＋ ' + tr('Log another sport')));
   const last = state.workouts[state.workouts.length - 1];
   if (last) root.append(el('p', { class: 'muted small center' }, tr('Last workout: {what}, {when}', { what: kindLabel(last), when: relDay(last.date) })));
@@ -231,42 +223,75 @@ function kindLabel(w) {
 function seg(options, value, onchange, cls = '') {
   return el('div', { class: 'seg ' + cls }, options.map(([v, l]) => el('button', { class: value === v ? 'on' : '', onclick: () => onchange(v) }, l)));
 }
-function ring(value, goal, label, sub) {
-  const pct = Math.min(1, goal ? value / goal : 0);
-  const C = 2 * Math.PI * 26;
-  return el('div', { class: 'ring' + (value >= goal ? ' done' : '') },
-    el('div', { class: 'ring-svg', html: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" class="rb"/><circle cx="32" cy="32" r="26" class="rf" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/></svg>` },
-      el('div', { class: 'ring-n' }, value >= goal && goal ? '✓' : `${value}/${goal}`)),
-    el('div', { class: 'ring-l' }, label), sub ? el('div', { class: 'ring-s' }, sub) : null);
+function fixType() {
+  const s = state.settings;
+  const ok = s.place === 'home' ? ['cali', 'run'] : ['gym', 'cali', 'run'];
+  if (!ok.includes(s.type)) s.type = ok[0];
 }
-function heroCard() {
+// Gym/home, type and time in one sheet, opened from the three small buttons
+function openPickSheet() {
+  const s = state.settings;
+  const body = el('div', {});
+  const draw = () => {
+    fixType();
+    const types = s.place === 'home' ? [['cali', 'Bodyweight'], ['run', 'Run']] : [['gym', 'Gym'], ['cali', 'Bodyweight'], ['run', 'Run']];
+    body.innerHTML = '';
+    body.append(
+      el('h3', {}, tr('New workout')),
+      el('div', { class: 'lbl' }, tr('Where are you?')),
+      seg([['gym', '🏋️ ' + tr('Gym')], ['home', '🏠 ' + tr('Home, no equipment')]], s.place, (v) => { s.place = v; save(); draw(); }),
+      el('div', { class: 'lbl' }, tr('What do you want to do?')),
+      el('div', { class: 'types n' + types.length }, types.map(([v, l]) => el('button', { class: 'type' + (s.type === v ? ' on' : ''), onclick: () => { s.type = v; save(); draw(); } },
+        el('span', { class: 'type-ic' }, { gym: '🏋️', cali: '🤸', run: '🏃' }[v]), el('span', {}, tr(l))))),
+      el('div', { class: 'lbl' }, tr('How much time do you have?')),
+      el('div', { class: 'chips' }, TIMES.map((m) => el('button', { class: 'chip' + (s.minutes === m ? ' on' : ''), onclick: () => { s.minutes = m; save(); draw(); } }, `${m} min`))),
+      el('div', { class: 'sheet-actions' }, el('button', { class: 'btn primary', onclick: () => { closeSheet(); render(); } }, tr('Done'))));
+  };
+  draw(); openSheet(body);
+}
+// Week goal as three neon rings + rank bar + stats + recovery (the "Neon + Data" design)
+function dashboard() {
   const lvl = characterLevel(state), rk = rankFor(lvl);
-  const pct = rk.next ? Math.round(100 * (lvl - rk.from) / (rk.next.at - rk.from)) : 100;
-  const st = streak(state, new Date());
-  return el('button', { class: 'card hero2', onclick: () => setView('skills') },
-    el('div', { class: 'h2-top' },
-      el('div', { class: 'h2-rank' }, el('span', { class: 'h2-ic' }, rk.icon), el('div', {}, el('small', {}, tr('Rank')), el('b', {}, tr(rk.name)))),
-      el('div', { class: 'h2-lvl' }, el('small', {}, 'LVL'), el('b', {}, lvl))),
-    el('div', { class: 'xp' }, el('div', { style: `width:${pct}%` })),
-    el('div', { class: 'h2-sub' },
-      el('span', {}, rk.next ? tr('{n} levels to {rank}', { n: rk.next.at - lvl, rank: tr(rk.next.name) }) : tr('Highest rank!')),
-      el('span', { class: 'flame' + (st.weeks ? ' on' : '') }, `🔥 ${st.weeks}`)));
-}
-function weekCard() {
+  const xp = rk.next ? Math.round(100 * (lvl - rk.from) / (rk.next.at - rk.from)) : 100;
   const st = streak(state, new Date());
   const w = st.thisWeek, g = state.settings.goals;
-  const daysLeft = 6 - ((new Date().getDay() + 6) % 7);
-  let tokenLine;
-  if (w.met) tokenLine = tr('Week goal done. Nice!');
-  else if (w.short === 1) tokenLine = tr('One session to go. If it doesn’t happen, your rest token saves the streak.');
-  else tokenLine = tr('{n} sessions to go, {d} days left.', { n: w.short, d: daysLeft + 1 });
-  return el('div', { class: 'card' },
-    el('div', { class: 'card-head' }, el('h2', {}, tr('This week')), el('span', { class: 'streak' + (st.weeks ? ' on' : '') }, tr('{n} weeks in a row', { n: st.weeks }))),
-    el('div', { class: 'rings' },
-      ring(w.strength, g.strength, tr('Strength')),
-      ring(w.runs, g.runs, tr('Running')),
-      ring(w.minutes, 150, tr('Minutes'), tr('guideline 150'))),
-    el('p', { class: 'muted small tl' }, tokenLine));
+  const parts = [[w.strength, g.strength], [w.runs, g.runs], [w.minutes, 150]].map(([v, goal]) => (goal ? Math.min(1, v / goal) : 1));
+  const pct = Math.round(100 * parts.reduce((x, y) => x + y, 0) / 3);
+  const dayIdx = (new Date().getDay() + 6) % 7; // 0 = Monday
+  const onTrack = pct >= Math.round(100 * dayIdx / 7);
+  const status = w.met ? ['good', tr('Goal done')] : onTrack ? ['good', tr('On track')] : ['warn', tr('{n} to go', { n: w.short })];
+  const R = [118, 99, 80];
+  const arcs = parts.map((p, i) => {
+    const C = 2 * Math.PI * R[i];
+    return `<circle cx="131" cy="131" r="${R[i]}" class="g-bg"/>` + (p > 0 ? `<circle cx="131" cy="131" r="${R[i]}" stroke="url(#gg${i})" stroke-dasharray="${(C * p).toFixed(1)} ${C.toFixed(1)}"/>` : '');
+  }).join('');
+  const svg = `<svg viewBox="0 0 262 262" aria-hidden="true"><defs>
+    <linearGradient id="gg0" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b61ff"/><stop offset="1" stop-color="#b05cff"/></linearGradient>
+    <linearGradient id="gg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5ca8"/><stop offset="1" stop-color="#ff8fc6"/></linearGradient>
+    <linearGradient id="gg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fc3ff"/><stop offset="1" stop-color="#8f7cff"/></linearGradient>
+    </defs><g fill="none" stroke-width="12" stroke-linecap="round" transform="rotate(-90 131 131)">${arcs}</g></svg>`;
+  const got = Object.keys(state.badges || {}).length;
+  const vol = weekVolume(state, new Date());
+  const rec = recovery(state, new Date());
+  return el('div', { class: 'dash' },
+    el('button', { class: 'rankbar', onclick: () => setView('skills') },
+      el('span', { class: 'rb-ic' }, rk.icon), el('b', {}, tr(rk.name)),
+      el('div', { class: 'rb-xp' }, el('div', { style: `width:${xp}%` })),
+      el('span', { class: 'rb-next' }, rk.next ? '→ ' + tr(rk.next.name) : tr('Highest rank!'))),
+    el('div', { class: 'gauge' }, el('div', { class: 'g-svg', html: svg }),
+      el('div', { class: 'g-mid' }, el('div', { class: 'g-lbl' }, tr('Week goal')), el('div', { class: 'g-big' }, String(pct), el('small', {}, '%')), el('div', { class: 'g-st gs-' + status[0] }, status[1]))),
+    el('div', { class: 'glegend' },
+      el('span', {}, el('i', { class: 'c0' }), `${tr('Strength')} ${w.strength}/${g.strength}`),
+      el('span', {}, el('i', { class: 'c1' }), `${tr('Running')} ${w.runs}/${g.runs}`),
+      el('span', {}, el('i', { class: 'c2' }), `${w.minutes}/150 min`)),
+    el('div', { class: 'stats3' },
+      el('div', {}, el('div', { class: 'g-lbl' }, tr('Volume')), el('div', { class: 'sv' }, vol.toLocaleString(LOC()), el('em', {}, 'kg'))),
+      el('div', {}, el('div', { class: 'g-lbl' }, tr('Streak')), el('div', { class: 'sv' }, (st.weeks ? '🔥' : '') + st.weeks, el('em', {}, tr('wk')))),
+      el('button', { onclick: () => setView('skills') }, el('div', { class: 'g-lbl' }, tr('Badges')), el('div', { class: 'sv' }, String(got), el('em', {}, '/' + BADGES.length)))),
+    el('div', { class: 'rec-h' }, el('span', {}, tr('Recovery')), el('small', {}, tr('100 = fully rested'))),
+    rec.map((r) => el('div', { class: 'rec' }, el('span', {}, tr(r.name)),
+      el('div', { class: 'rec-bar' }, el('div', { class: r.pct >= 80 ? 'ok' : r.pct >= 50 ? 'mid' : 'low', style: `width:${Math.max(3, r.pct)}%` })),
+      el('span', { class: 'rec-n' }, String(r.pct)))));
 }
 
 function makeWorkout() {

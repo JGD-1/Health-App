@@ -18,6 +18,8 @@ const NL = {
   'Log another sport': 'Andere sport loggen', 'Last workout: {what}, {when}': 'Laatste training: {what}, {when}',
   'Run-walk': 'Hardlopen-wandelen', 'Easy run': 'Rustige duurloop', 'Intervals': 'Intervallen', 'Long run': 'Lange duurloop',
   'Other sport': 'Andere sport', 'Home workout': 'Thuistraining',
+  'Week goal': 'Weekdoel', 'Goal done': 'Doel gehaald', 'On track': 'Op schema', '{n} to go': 'Nog {n} te gaan', 'Volume': 'Volume', 'Streak': 'Streak', 'wk': 'wk',
+  'Recovery': 'Herstel', '100 = fully rested': '100 = uitgerust', 'Chest': 'Borst', 'Back muscles': 'Rug', 'Shoulders': 'Schouders', 'Legs': 'Benen',
   'This week': 'Deze week', '{n} wk': '{n} wk', 'Strength': 'Kracht', 'Running': 'Hardlopen', 'guideline 150': 'richtlijn 150',
   'Week goal done. Nice!': 'Weekdoel gehaald. Top!',
   'One session to go. If it doesn’t happen, your rest token saves the streak.': 'Nog één training. Lukt dat niet, dan redt je rusttoken je reeks.',

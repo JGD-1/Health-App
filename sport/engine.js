@@ -605,4 +605,27 @@ function streak(state, today) {
   return { weeks: n, tokensUsed: tokens, thisWeek: now };
 }
 
-if (typeof module !== 'undefined') module.exports = { volume, rankFor, checkBadges, BADGES, estimateKg, ANCHORS, anchorKg, generateStrength, generateRun, applyProgress, parseReps, parseTest, characterLevel, streak, weekResult, tierFor, TIERS, estimate, exerciseFor, LADDERS, SKILL_LADDERS, EX_BY_ID, dayKey, weekKey, ladderExercises, maxLevel, runLevel, ladderLevel, lastLog, bodyweight, longestRun };
+/* ---------- recovery per muscle group (from when it was last trained; ~48 h for strength, ~24 h for legs after a run) ---------- */
+const MUSCLES = [['Chest', ['hpush']], ['Back muscles', ['hpull', 'vpull']], ['Shoulders', ['vpush']], ['Legs', ['squat', 'lunge', 'hinge']]];
+function recovery(state, now) {
+  now = now || new Date();
+  const at = (w) => (w.end ? new Date(w.end) : new Date(parseDay(w.date).getTime() + 18 * 3600000));
+  return MUSCLES.map(([name, pats]) => {
+    let pct = 100;
+    for (const w of state.workouts) {
+      const h = (now - at(w)) / 3600000;
+      if (h < 0 || h > 72) continue;
+      let need = 0;
+      if ((w.kind === 'gym' || w.kind === 'cali') && (w.patterns || []).some((p) => pats.includes(p))) need = 48;
+      else if (w.kind === 'run' && name === 'Legs') need = 24;
+      if (need) pct = Math.min(pct, Math.max(0, Math.round(100 * h / need)));
+    }
+    return { name, pct: Math.min(100, pct) };
+  });
+}
+function weekVolume(state, today) {
+  const wk = weekKey(today || new Date());
+  return state.workouts.filter((w) => weekKey(w.date) === wk).reduce((a, w) => a + volume(w), 0);
+}
+
+if (typeof module !== 'undefined') module.exports = { recovery, weekVolume, volume, rankFor, checkBadges, BADGES, estimateKg, ANCHORS, anchorKg, generateStrength, generateRun, applyProgress, parseReps, parseTest, characterLevel, streak, weekResult, tierFor, TIERS, estimate, exerciseFor, LADDERS, SKILL_LADDERS, EX_BY_ID, dayKey, weekKey, ladderExercises, maxLevel, runLevel, ladderLevel, lastLog, bodyweight, longestRun };
